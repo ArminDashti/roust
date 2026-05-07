@@ -77,6 +77,27 @@ fn handle_ip_command(action: IpCommands, config_path: &PathBuf) -> Result<()> {
                 Ok(())
             }
 
+            IpDestCommands::List => {
+                // Load config
+                let config = load_config(config_path)?;
+
+                let rules = config.get_rules();
+                if rules.is_empty() {
+                    println!("No routing rules configured.");
+                    return Ok(());
+                }
+
+                println!("\n{:<30} {:<50}", "IP/CIDR", "Destination NIC");
+                println!("{}", "-".repeat(82));
+
+                for rule in rules {
+                    println!("{:<30} {:<50}", rule.ip, rule.nic);
+                }
+
+                println!("\nTotal: {} rule(s)", rules.len());
+                Ok(())
+            }
+
             IpDestCommands::Add { ip, dest, file } => {
                 // Load existing config or create new
                 let mut config = load_config(config_path).unwrap_or_else(|_| Config::new());
@@ -120,6 +141,21 @@ fn handle_ip_command(action: IpCommands, config_path: &PathBuf) -> Result<()> {
                 // Save config
                 config.save(config_path)?;
                 println!("Config saved to {:?}", config_path);
+
+                Ok(())
+            }
+
+            IpDestCommands::Remove { ip } => {
+                // Load config
+                let mut config = load_config(config_path)?;
+
+                if config.remove_rule(&ip) {
+                    config.save(config_path)?;
+                    println!("Removed rule: {}", ip);
+                    println!("Config saved to {:?}", config_path);
+                } else {
+                    println!("No rule found for: {}", ip);
+                }
 
                 Ok(())
             }

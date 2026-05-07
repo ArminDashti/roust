@@ -63,7 +63,6 @@ impl Config {
         Ok(())
     }
 
-    #[allow(dead_code)]
     /// Remove a routing rule by IP
     pub fn remove_rule(&mut self, ip: &str) -> bool {
         let initial_len = self.rules.len();
@@ -113,14 +112,13 @@ impl Config {
         Ok(())
     }
 
-    #[allow(dead_code)]
     /// Get all rules
     pub fn get_rules(&self) -> &[RoutingRule] {
         &self.rules
     }
 
-    #[allow(dead_code)]
     /// Clear all rules
+    #[allow(dead_code)]
     pub fn clear_rules(&mut self) {
         self.rules.clear();
     }
