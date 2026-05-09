@@ -12,6 +12,8 @@ pub struct RoutingRule {
     pub ip: String,
     /// Network interface name (NIC) destination
     pub nic: String,
+    /// Optional IP address to rewrite the destination to
+    pub rewrite_to: Option<String>,
 }
 
 /// Main configuration structure
@@ -52,13 +54,16 @@ impl Config {
     }
 
     /// Add a routing rule
-    pub fn add_rule(&mut self, ip: String, nic: String) -> Result<()> {
+    pub fn add_rule(&mut self, ip: String, nic: String, rewrite_to: Option<String>) -> Result<()> {
         // Validate IP format
         if ip != "*" {
             self.validate_ip_format(&ip)?;
         }
+        if let Some(ref rewrite) = rewrite_to {
+            rewrite.parse::<IpAddr>()?;
+        }
 
-        let rule = RoutingRule { ip, nic };
+        let rule = RoutingRule { ip, nic, rewrite_to };
         self.rules.push(rule);
         Ok(())
     }
@@ -70,11 +75,11 @@ impl Config {
         self.rules.len() < initial_len
     }
 
-    /// Find the destination NIC for a given IP address
-    pub fn find_destination(&self, ip: &str) -> Option<String> {
+    /// Find the destination NIC and optional rewrite address for a given IP address
+    pub fn find_destination(&self, ip: &str) -> Option<(String, Option<String>)> {
         for rule in &self.rules {
             if self.ip_matches(&rule.ip, ip) {
-                return Some(rule.nic.clone());
+                return Some((rule.nic.clone(), rule.rewrite_to.clone()));
             }
         }
         None
@@ -101,7 +106,6 @@ impl Config {
 
     /// Validate IP format (CIDR or single IP)
     fn validate_ip_format(&self, ip: &str) -> Result<()> {
-        // Try parsing as CIDR first
         if ip.contains('/') {
             ip.parse::<IpNetwork>()?;
             return Ok(());

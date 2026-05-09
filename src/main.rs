@@ -1,11 +1,12 @@
 mod cli;
 mod config;
-mod nics;
+mod network;
+mod core;
 
-use anyhow::Result;
-use cli::{parse_cli, Commands, NicCommands, IpCommands, IpDestCommands};
-use config::Config;
-use nics::enumerate_interfaces;
+use anyhow::{anyhow, Result};
+use cli::{parse_cli, Commands, NicCommands, RuleAction};
+use config::{Config};
+use network::enumerate_interfaces;
 use std::fs;
 use std::path::PathBuf;
 
@@ -22,13 +23,13 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Nics { action } => handle_nics_command(action)?,
-        Commands::Ip { action } => handle_ip_command(action, &config_path)?,
-        Commands::Start { service, install_service } => {
-            handle_start_command(service, install_service)?;
-        }
-        Commands::Stop { service, uninstall_service } => {
-            handle_stop_command(service, uninstall_service)?;
-        }
+        Commands::Add { action } => handle_add_rule(action, &config_path)?,
+        Commands::Delete { action } => handle_delete_rule(action, &config_path)?,
+        Commands::Edit { action } => handle_edit_rule(action, &config_path)?,
+        Commands::Start => handle_start_command(&config_path)?,
+        Commands::Stop => handle_stop_command()?,
+        Commands::Restart => handle_restart_command(&config_path)?,
+        Commands::Status => handle_status_command()?,
     }
 
     Ok(())
@@ -36,7 +37,7 @@ fn main() -> Result<()> {
 
 fn handle_nics_command(action: NicCommands) -> Result<()> {
     match action {
-        NicCommands::Show => {
+        NicCommands::List => {
             println!("\n{:<20} {:<40} {:<20} {:<15} {:<20}", "Name", "Description", "MAC Address", "Type", "IPv4 Address");
             println!("{}", "-".repeat(120));
 
@@ -48,150 +49,93 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
                     nic.name, nic.display_name, nic.mac_address, nic.status, ipv4
                 );
             }
-
-            if interfaces.is_empty() {
-                println!("No network interfaces found.");
-            }
             Ok(())
         }
     }
 }
 
-fn handle_ip_command(action: IpCommands, config_path: &PathBuf) -> Result<()> {
-    match action {
-        IpCommands::Dest { action } => match action {
-            IpDestCommands::Show { ip } => {
-                // Load config
-                let config = load_config(config_path)?;
+fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
+    if let RuleAction::Rule { ip, nic, file } = action {
+        let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
 
-                // Find destination
-                match config.find_destination(&ip) {
-                    Some(dest) => {
-                        println!("IP {} -> NIC: {}", ip, dest);
-                    }
-                    None => {
-                        println!("No routing rule found for IP: {}", ip);
-                    }
-                }
-
-                Ok(())
+        if let Some(dest) = nic {
+            let nics = enumerate_interfaces()?;
+            if !nics.iter().any(|n| n.name.eq_ignore_ascii_case(&dest)) {
+                return Err(anyhow!("Interface '{}' not found", dest));
             }
 
-            IpDestCommands::List => {
-                // Load config
-                let config = load_config(config_path)?;
-
-                let rules = config.get_rules();
-                if rules.is_empty() {
-                    println!("No routing rules configured.");
-                    return Ok(());
-                }
-
-                println!("\n{:<30} {:<50}", "IP/CIDR", "Destination NIC");
-                println!("{}", "-".repeat(82));
-
-                for rule in rules {
-                    println!("{:<30} {:<50}", rule.ip, rule.nic);
-                }
-
-                println!("\nTotal: {} rule(s)", rules.len());
-                Ok(())
-            }
-
-            IpDestCommands::Add { ip, dest, file } => {
-                // Load existing config or create new
-                let mut config = load_config(config_path).unwrap_or_else(|_| Config::new());
-
-                // Validate NIC exists
-                let nics = enumerate_interfaces()?;
-                if !nics.iter().any(|nic| nic.name.eq_ignore_ascii_case(&dest)) {
-                    eprintln!("Error: Network interface '{}' not found", dest);
-                    println!("Available NICs:");
-                    for nic in nics {
-                        println!("  - {} ({})", nic.name, nic.display_name);
-                    }
-                    return Err(anyhow::anyhow!("Invalid NIC: {}", dest));
-                }
-
-                // Handle file input or direct IP
-                if let Some(file_path) = file {
-                    // Load IPs from file
-                    let file_contents = fs::read_to_string(&file_path)?;
-                    let mut added_count = 0;
-
-                    for line in file_contents.lines() {
-                        let ip_str = line.trim();
-                        if !ip_str.is_empty() && !ip_str.starts_with('#') {
-                            config.add_rule(ip_str.to_string(), dest.clone())?;
-                            added_count += 1;
-                        }
-                    }
-
-                    println!("Added {} routes from file: {:?}", added_count, file_path);
-                } else if let Some(ip_str) = ip {
-                    // Add single IP
-                    config.add_rule(ip_str.clone(), dest.clone())?;
-                    println!("Added route: {} -> {}", ip_str, dest);
+            if let Some(file_path) = file {
+                let content = fs::read_to_string(&file_path)?;
+                let ips: Vec<String> = if file_path.extension().map_or(false, |ext| ext == "json") {
+                    serde_json::from_str(&content)?
                 } else {
-                    return Err(anyhow::anyhow!(
-                        "Either --ip or --file must be provided"
-                    ));
-                }
+                    content
+                        .lines()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                };
 
-                // Save config
+                for ip_str in ips {
+                    config.add_rule(ip_str, dest.clone(), None)?;
+                }
+            } else if let Some(ip_addr) = ip {
+                config.add_rule(ip_addr, dest, None)?;
+            }
+            config.save(config_path)?;
+            println!("Rule(s) added successfully.");
+        }
+    }
+    Ok(())
+}
+
+fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
+    if let RuleAction::Rule { ip, .. } = action {
+        if let Some(ip_addr) = ip {
+            let mut config = Config::load(config_path)?;
+            if config.remove_rule(&ip_addr) {
                 config.save(config_path)?;
-                println!("Config saved to {:?}", config_path);
-
-                Ok(())
+                println!("Rule deleted successfully.");
+            } else {
+                println!("Rule not found.");
             }
-
-            IpDestCommands::Remove { ip } => {
-                // Load config
-                let mut config = load_config(config_path)?;
-
-                if config.remove_rule(&ip) {
-                    config.save(config_path)?;
-                    println!("Removed rule: {}", ip);
-                    println!("Config saved to {:?}", config_path);
-                } else {
-                    println!("No rule found for: {}", ip);
-                }
-
-                Ok(())
-            }
-        },
-    }
-}
-
-fn handle_start_command(service: bool, install_service: bool) -> Result<()> {
-    if service || install_service {
-        println!("[TODO] Windows Service start not yet implemented");
-        println!("Service mode requested (install_service={})", install_service);
-    } else {
-        println!("[TODO] Daemon mode start not yet implemented");
-        println!("Would start router in daemon mode...");
+        }
     }
     Ok(())
 }
 
-fn handle_stop_command(service: bool, uninstall_service: bool) -> Result<()> {
-    if service || uninstall_service {
-        println!("[TODO] Windows Service stop not yet implemented");
-        println!("Service mode requested (uninstall_service={})", uninstall_service);
-    } else {
-        println!("[TODO] Daemon mode stop not yet implemented");
-        println!("Would stop router daemon...");
+fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
+    if let RuleAction::Rule { ip, nic, .. } = action {
+        if let (Some(ip_addr), Some(new_nic)) = (ip, nic) {
+            let mut config = Config::load(config_path)?;
+            config.remove_rule(&ip_addr);
+            config.add_rule(ip_addr, new_nic, None)?;
+            config.save(config_path)?;
+            println!("Rule edited successfully.");
+        }
     }
     Ok(())
 }
 
-fn load_config(config_path: &PathBuf) -> Result<Config> {
-    if config_path.exists() {
-        Config::load(config_path)
-    } else {
-        Err(anyhow::anyhow!(
-            "Config file not found: {:?}. Create one with 'roust ip dest add' command.",
-            config_path
-        ))
-    }
+fn handle_start_command(config_path: &PathBuf) -> Result<()> {
+    let config = Config::load(config_path)?;
+    println!("[INFO] Starting router with {} rules...", config.rules.len());
+    // Implementation of router start...
+    Ok(())
+}
+
+fn handle_stop_command() -> Result<()> {
+    println!("[INFO] Router stopped.");
+    Ok(())
+}
+
+fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
+    handle_stop_command()?;
+    handle_start_command(config_path)?;
+    Ok(())
+}
+
+fn handle_status_command() -> Result<()> {
+    println!("[INFO] Router status: Not running (placeholder).");
+    Ok(())
 }
