@@ -9,6 +9,9 @@ use std::path::PathBuf;
   roust nics show
     Display all network interfaces on this machine
 
+  roust route predict --dest 8.8.8.8
+    Show which NIC Windows would use for that destination (routing table)
+
   roust ip dest show --ip=192.168.1.100
     Check where 192.168.1.100 will be routed
 
@@ -73,6 +76,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: NicCommands,
     },
+    /// Resolve egress interface from the routing table (before packet capture)
+    Route {
+        #[command(subcommand)]
+        action: RouteCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -90,6 +98,16 @@ pub enum RuleAction {
 #[derive(Subcommand)]
 pub enum NicCommands {
     List,
+}
+
+#[derive(Subcommand)]
+pub enum RouteCommands {
+    /// Which NIC `GetBestRoute` selects for an IPv4 destination
+    Predict {
+        /// IPv4 address (e.g. 8.8.8.8)
+        #[arg(long)]
+        dest: String,
+    },
 }
 
 pub fn parse_cli() -> Cli {
