@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 # CLI and argument parsing
-clap = { version = "4.5", features = ["derive"] }
+# Pin below 4.6 so clap_derive does not require Cargo's unstable edition2024.
+clap = { version = "=4.5.27", features = ["derive"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -18,6 +19,7 @@ ipnetwork = "0.20"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
     "Win32_System_Memory",
     "Win32_System_Com",
 ] }

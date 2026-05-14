@@ -1,6 +1,7 @@
 mod windivert_ffi;
 
 use crate::config::Config;
+use crate::network::{predict_ipv4_egress, EgressPrediction};
 use anyhow::{anyhow, Result};
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -61,17 +62,28 @@ impl PacketRouter {
         self.running.load(Ordering::SeqCst)
     }
 
-    /// Extract destination IP from IPv4 packet
-    fn extract_dst_ip(packet: &[u8]) -> Option<String> {
+    /// Which local NIC Windows would use for this IPv4 packet's destination, resolved via
+    /// `GetBestRoute` (routing table) before relying on WinDivert `if_idx` on a live packet.
+    pub fn predict_egress_for_packet(&self, packet: &[u8]) -> Result<Option<EgressPrediction>> {
+        let Some(dst) = Self::extract_dst_ipv4(packet) else {
+            return Ok(None);
+        };
+        let prediction = predict_ipv4_egress(dst)?;
+        Ok(Some(prediction))
+    }
+
+    /// Extract destination IPv4 from an IPv4 packet (header only).
+    fn extract_dst_ipv4(packet: &[u8]) -> Option<Ipv4Addr> {
         if packet.len() < 20 {
             return None;
         }
-
-        // IPv4 header: destination IP is at bytes 16-19
         let dst_bytes = &packet[16..20];
-        let dst_ip = Ipv4Addr::new(dst_bytes[0], dst_bytes[1], dst_bytes[2], dst_bytes[3]);
-        
-        Some(dst_ip.to_string())
+        Some(Ipv4Addr::new(dst_bytes[0], dst_bytes[1], dst_bytes[2], dst_bytes[3]))
+    }
+
+    /// Extract destination IP from IPv4 packet
+    fn extract_dst_ip(packet: &[u8]) -> Option<String> {
+        Self::extract_dst_ipv4(packet).map(|ip| ip.to_string())
     }
 
     /// Modify IPv4 packet destination based on routing rules
@@ -117,6 +129,7 @@ impl PacketRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     #[test]
     fn test_extract_dst_ip() {
@@ -146,8 +159,32 @@ mod tests {
 
         let nic = router.apply_routing_rule(&mut packet);
         assert_eq!(nic, Some("Ethernet".to_string()));
-        
+
         let new_dst = PacketRouter::extract_dst_ip(&packet);
         assert_eq!(new_dst, Some("10.0.0.1".to_string()));
+    }
+
+    #[test]
+    fn test_predict_egress_short_packet() {
+        let router = PacketRouter::new(Config::new());
+        let r = router.predict_egress_for_packet(&[0u8; 4]).unwrap();
+        assert!(r.is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_predict_egress_for_public_dns() {
+        let router = PacketRouter::new(Config::new());
+        let mut packet = vec![0u8; 20];
+        packet[16] = 8;
+        packet[17] = 8;
+        packet[18] = 8;
+        packet[19] = 8;
+        let pred = router
+            .predict_egress_for_packet(&packet)
+            .expect("predict")
+            .expect("some prediction");
+        assert_eq!(pred.dest, Ipv4Addr::new(8, 8, 8, 8));
+        assert!(pred.if_index > 0);
     }
 }
