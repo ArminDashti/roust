@@ -181,12 +181,27 @@ mod tests {
     #[test]
     fn test_find_destination() {
         let mut config = Config::new();
-        config.add_rule("192.168.1.0/24".to_string(), "Ethernet".to_string()).unwrap();
-        config.add_rule("10.0.0.0/8".to_string(), "WiFi".to_string()).unwrap();
-        config.add_rule("*".to_string(), "Ethernet".to_string()).unwrap();
+        config
+            .add_rule("192.168.1.0/24".to_string(), "Ethernet".to_string(), None)
+            .unwrap();
+        config
+            .add_rule("10.0.0.0/8".to_string(), "WiFi".to_string(), None)
+            .unwrap();
+        config
+            .add_rule("*".to_string(), "Ethernet".to_string(), None)
+            .unwrap();
 
-        assert_eq!(config.find_destination("192.168.1.100"), Some("Ethernet".to_string()));
-        assert_eq!(config.find_destination("10.5.5.5"), Some("WiFi".to_string()));
-        assert_eq!(config.find_destination("172.16.0.1"), Some("Ethernet".to_string()));
+        assert_eq!(
+            config.find_destination("192.168.1.100"),
+            Some(("Ethernet".to_string(), None))
+        );
+        assert_eq!(
+            config.find_destination("10.5.5.5"),
+            Some(("WiFi".to_string(), None))
+        );
+        assert_eq!(
+            config.find_destination("172.16.0.1"),
+            Some(("Ethernet".to_string(), None))
+        );
     }
 }
