@@ -32,6 +32,9 @@ use std::path::PathBuf;
 
   roust stop
     Stop the router daemon
+
+  roust update
+    Download Iran aggregated IP blocks and write ipv4.txt, ipv6.txt, etc.
 ")]
 pub struct Cli {
     #[command(subcommand)]
@@ -81,6 +84,8 @@ pub enum Commands {
         #[command(subcommand)]
         action: RouteCommands,
     },
+    /// Download Iran country IP block lists (ipverse) into the current directory
+    Update,
 }
 
 #[derive(Subcommand)]

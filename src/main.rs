@@ -2,11 +2,13 @@ mod cli;
 mod config;
 mod network;
 mod core;
+mod update;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
 use config::Config;
 use network::enumerate_interfaces;
+use std::env;
 use std::fs;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -32,6 +34,14 @@ fn main() -> Result<()> {
         Commands::Stop => handle_stop_command()?,
         Commands::Restart => handle_restart_command(&config_path)?,
         Commands::Status => handle_status_command()?,
+        Commands::Update => {
+            let out_dir = env::current_dir().context("resolve current directory for roust update")?;
+            update::run(&out_dir)?;
+            println!(
+                "Updated ipv4.txt, ipv6.txt, ipv4-cidr.txt, ipv6-cidr.txt in {}",
+                out_dir.display()
+            );
+        }
     }
 
     Ok(())

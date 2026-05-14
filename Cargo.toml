@@ -32,6 +32,11 @@ env_logger = "0.11"
 anyhow = "1.0"
 thiserror = "1.0"
 
+# HTTP (blocking) for `roust update`
+ureq = "2.12"
+# Pin transitive `url` so `idna_adapter` (Rust 1.86 / edition2024) is not pulled; CI uses Rust 1.83.
+url = "=2.5.0"
+
 # System utilities
 lazy_static = "1.4"
 
