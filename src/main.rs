@@ -38,7 +38,7 @@ fn main() -> Result<()> {
             let out_dir = env::current_dir().context("resolve current directory for roust update")?; // Use the process working directory as the output folder for list files
             update::run(&out_dir)?; // Download Iran IP JSON via shared library code and rewrite the text list files there
             println!( // Print a user-visible confirmation listing which files were refreshed
-                "Updated ipv4.txt, ipv6.txt, ipv4-cidr.txt, ipv6-cidr.txt in {}", // Message template naming the four list files and the folder path
+                "Updated ipv4.txt, ipv6.txt, ipv4_cidr.txt, ipv6_cidr.txt in {}", // Message template naming the four list files and the folder path
                 out_dir.display() // Provide the display form of the output directory for the placeholder in the template
             ); // Finish the println macro call after printing the update summary line
         }
