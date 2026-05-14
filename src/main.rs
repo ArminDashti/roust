@@ -2,9 +2,9 @@ mod cli;
 mod config;
 mod network;
 mod core;
-mod update;
 
 use anyhow::{anyhow, Context, Result};
+use roust::update;
 use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
 use config::Config;
 use network::enumerate_interfaces;
