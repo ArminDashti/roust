@@ -1,7 +1,7 @@
 mod cli;
 mod config;
-mod network;
 mod core;
+mod network;
 
 use anyhow::{anyhow, Result};
 use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
@@ -83,7 +83,13 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
 }
 
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule { ip, nic, file } = action {
+    if let RuleAction::Rule {
+        ip,
+        nic,
+        file,
+        rewrite_to,
+    } = action
+    {
         let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
 
         if let Some(dest) = nic {
@@ -105,10 +111,10 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
                 };
 
                 for ip_str in ips {
-                    config.add_rule(ip_str, dest.clone(), None)?;
+                    config.add_rule(ip_str, dest.clone(), rewrite_to.clone())?;
                 }
             } else if let Some(ip_addr) = ip {
-                config.add_rule(ip_addr, dest, None)?;
+                config.add_rule(ip_addr, dest, rewrite_to)?;
             }
             config.save(config_path)?;
             println!("Rule(s) added successfully.");
@@ -147,13 +153,24 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
 fn handle_start_command(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
-    println!("[INFO] Starting router with {} rules...", config.rules.len());
-    // Implementation of router start...
-    Ok(())
+    println!(
+        "[INFO] WinDivert intercept: {} rule(s). Ctrl+C to stop.",
+        config.rules.len()
+    );
+    for rule in &config.rules {
+        let rw = rule
+            .rewrite_to
+            .as_deref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(none)".to_string());
+        println!("  - {} → {}  rewrite_to={}", rule.ip, rule.nic, rw);
+    }
+    let router = core::PacketRouter::new(config);
+    router.start_blocking()
 }
 
 fn handle_stop_command() -> Result<()> {
-    println!("[INFO] Router stopped.");
+    println!("[INFO] Stop is not available as a separate process; press Ctrl+C in the terminal running `roust start`.");
     Ok(())
 }
 
@@ -164,6 +181,6 @@ fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
 }
 
 fn handle_status_command() -> Result<()> {
-    println!("[INFO] Router status: Not running (placeholder).");
+    println!("[INFO] When `roust start` is running, the router is active in that process.");
     Ok(())
 }
