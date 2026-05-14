@@ -4,10 +4,11 @@ mod network;
 mod core;
 
 use anyhow::{anyhow, Result};
-use cli::{parse_cli, Commands, NicCommands, RuleAction};
-use config::{Config};
+use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
+use config::Config;
 use network::enumerate_interfaces;
 use std::fs;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -23,6 +24,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Nics { action } => handle_nics_command(action)?,
+        Commands::Route { action } => handle_route_command(action)?,
         Commands::Add { action } => handle_add_rule(action, &config_path)?,
         Commands::Delete { action } => handle_delete_rule(action, &config_path)?,
         Commands::Edit { action } => handle_edit_rule(action, &config_path)?,
@@ -32,6 +34,32 @@ fn main() -> Result<()> {
         Commands::Status => handle_status_command()?,
     }
 
+    Ok(())
+}
+
+fn handle_route_command(action: RouteCommands) -> Result<()> {
+    match action {
+        RouteCommands::Predict { dest } => {
+            let ip: Ipv4Addr = dest
+                .parse()
+                .map_err(|_| anyhow!("--dest must be a valid IPv4 address (e.g. 8.8.8.8)"))?;
+            let p = network::predict_ipv4_egress(ip)?;
+            println!("destination:  {}", p.dest);
+            println!("if_index:     {}", p.if_index);
+            println!("next_hop:     {}", p.next_hop);
+            match (&p.nic_name, &p.nic_display) {
+                (Some(name), Some(disp)) => {
+                    println!("nic (name):   {}", name);
+                    println!("nic (desc):   {}", disp);
+                }
+                (Some(name), None) => println!("nic (name):   {}", name),
+                _ => println!(
+                    "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",
+                    p.if_index
+                ),
+            }
+        }
+    }
     Ok(())
 }
 
