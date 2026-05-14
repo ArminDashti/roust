@@ -1,2 +1,1 @@
-//! Shared library surface for `roust` binaries (CLI and setup).
-pub mod update;
+pub mod update; // Re-export the update module so binaries can share list-download logic

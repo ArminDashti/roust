@@ -3,8 +3,8 @@ mod config;
 mod network;
 mod core;
 
-use anyhow::{anyhow, Context, Result};
-use roust::update;
+use anyhow::{anyhow, Context, Result}; // Import shared error helpers used throughout the CLI binary
+use roust::update; // Import list download helpers from the library crate instead of declaring a local module
 use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
 use config::Config;
 use network::enumerate_interfaces;
@@ -35,12 +35,12 @@ fn main() -> Result<()> {
         Commands::Restart => handle_restart_command(&config_path)?,
         Commands::Status => handle_status_command()?,
         Commands::Update => {
-            let out_dir = env::current_dir().context("resolve current directory for roust update")?;
-            update::run(&out_dir)?;
-            println!(
-                "Updated ipv4.txt, ipv6.txt, ipv4-cidr.txt, ipv6-cidr.txt in {}",
-                out_dir.display()
-            );
+            let out_dir = env::current_dir().context("resolve current directory for roust update")?; // Use the process working directory as the output folder for list files
+            update::run(&out_dir)?; // Download Iran IP JSON via shared library code and rewrite the text list files there
+            println!( // Print a user-visible confirmation listing which files were refreshed
+                "Updated ipv4.txt, ipv6.txt, ipv4-cidr.txt, ipv6-cidr.txt in {}", // Message template naming the four list files and the folder path
+                out_dir.display() // Provide the display form of the output directory for the placeholder in the template
+            ); // Finish the println macro call after printing the update summary line
         }
     }
 
