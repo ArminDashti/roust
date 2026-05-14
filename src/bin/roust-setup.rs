@@ -12,6 +12,63 @@ use zip::ZipArchive; // Import the ZIP reader type so we can unpack the WinDiver
 
 const WINDIVERT_ZIP_URL: &str = "https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip"; // Official WinDivert 2.2.2 bundle URL that matches the expected SDK folder name
 
+#[cfg(windows)]
+fn rustup_init_download_url_for_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe", // Official rustup bootstrap EXE for 64-bit Windows MSVC hosts
+        "aarch64" => "https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe", // Official rustup bootstrap EXE for ARM64 Windows MSVC hosts
+        _ => "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe", // Fall back to the common 64-bit URL when the CPU architecture string is unexpected
+    } // Close the match on the compile-time host architecture constant
+} // Close the rustup_init_download_url_for_arch function
+
+#[cfg(windows)]
+fn rustc_responds_on_path() -> bool {
+    Command::new("rustc") // Spawn the Rust compiler driver so we can see whether it resolves on the current PATH
+        .arg("-V") // Ask rustc only for its version string so the probe stays lightweight
+        .status() // Wait for the child process and capture its exit information without keeping stdout
+        .map(|status| status.success()) // Treat success only when the exit code is zero meaning rustc is usable
+        .unwrap_or(false) // Treat spawn failures as meaning rustc is not available from this process environment
+} // Close the rustc_responds_on_path function
+
+#[cfg(windows)]
+fn ensure_rust_installed_via_rustup() -> Result<()> {
+    if env::var("ROUST_SKIP_RUST").is_ok() {
+        eprintln!("ROUST_SKIP_RUST is set so this installer will not download or run rustup-init.exe."); // Explain that the operator opted out of any Rust installation step
+        return Ok(()); // Return immediately without touching rustup when the skip environment variable is present
+    } // Close the branch that honors ROUST_SKIP_RUST
+    if rustc_responds_on_path() {
+        eprintln!("Rust is already installed because rustc answered successfully on the current PATH."); // Tell the user we detected an existing working Rust toolchain
+        return Ok(()); // Skip downloading rustup when the compiler is already callable from PATH
+    } // Close the early-return branch when rustc already works
+    eprintln!("Rust was not found on PATH; downloading rustup-init.exe to install the stable toolchain."); // Warn the user that a network download and installer run is about to start
+    let url = env::var("ROUST_RUSTUP_INIT_URL").unwrap_or_else(|_| rustup_init_download_url_for_arch().to_string()); // Allow overriding the rustup-init download URL for mirrors or air-gapped layouts
+    let installer_bytes = http_get_bytes(&url).context("download rustup-init.exe from static.rust-lang.org")?; // Fetch the rustup bootstrap executable bytes over HTTPS
+    let installer_path = env::temp_dir().join("roust-rustup-init.exe"); // Pick a predictable temporary file name inside the system temp directory
+    fs::write(&installer_path, &installer_bytes) // Persist the downloaded rustup-init bytes to disk so Windows can execute them
+        .with_context(|| format!("write rustup installer to {}", installer_path.display()))?; // Convert write failures into an error that names the temp path
+    let status = Command::new(&installer_path) // Launch the freshly written rustup installer executable as a child process
+        .arg("-y") // Pass rustup's non-interactive yes flag so the install can finish without prompts
+        .arg("--default-toolchain") // Tell rustup which toolchain name should become the default after install
+        .arg("stable") // Request the stable channel toolchain which matches what most developers expect from rustup
+        .status() // Block until rustup-init finishes and capture whether it reported success
+        .context("failed to execute rustup-init.exe after writing it to the temp folder")?; // Surface spawn failures such as missing permissions or blocked executables
+    let _ = fs::remove_file(&installer_path); // Best-effort delete of the installer EXE so the temp folder does not keep large binaries forever
+    if !status.success() {
+        anyhow::bail!( // Abort setup when rustup-init returns a failure exit code so the user knows Rust is still missing
+            "rustup-init.exe failed with status {:?}; install Rust manually from https://rustup.rs and rerun setup",
+            status.code() // Attach the OS exit code to the error message for support logs
+        ); // End the bail invocation that returns a structured error to main
+    } // Close the branch that handles a non-zero rustup-init exit status
+    eprintln!("Rust stable was installed for this user; open a new PowerShell window before expecting rustc on PATH."); // Remind the user that PATH updates from rustup apply to new shells first
+    Ok(()) // Signal success after rustup-init reported a clean exit code
+} // Close the ensure_rust_installed_via_rustup function
+
+#[cfg(not(windows))]
+fn ensure_rust_installed_via_rustup() -> Result<()> {
+    eprintln!("Skipping Rust installation check because this host is not Windows."); // Explain that rustup-init is only orchestrated from the Windows setup path
+    Ok(()) // Return success immediately on non-Windows platforms where this step is a no-op
+} // Close the non-Windows stub for Rust installation
+
 fn install_dir() -> Result<PathBuf> {
     let exe = env::current_exe().context("resolve path of this executable")?; // Locate this running program so we can anchor paths beside it
     exe.parent() // Take the parent folder of the executable path if it exists
@@ -130,6 +187,8 @@ fn main() -> Result<()> {
     let logs = dir.join("logs"); // Build the path to the logs folder under the install directory
     fs::create_dir_all(&logs).with_context(|| format!("create logs directory {}", logs.display()))?; // Create the logs folder if it is missing
     eprintln!("Logs directory ready: {}", logs.display()); // Confirm the logs folder path to the operator
+
+    ensure_rust_installed_via_rustup().context("ensure Rust toolchain via rustup when rustc is missing")?; // Install Rust with rustup-init on Windows whenever rustc is not already on PATH
 
     setup_windivert(&dir)?; // Download and unpack WinDivert unless it is already present
 
