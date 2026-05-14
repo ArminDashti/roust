@@ -1,9 +1,13 @@
-use anyhow::{Context, Result}; // Import anyhow helpers for attaching context to errors
+use anyhow::{Context, Result}; // Import anyhow helpers for attaching context to errors and the shared Result alias
+#[cfg(windows)]
+use anyhow::anyhow; // Import the anyhow macro only on Windows where PATH registration code needs it
 use roust::update; // Import shared update routines that fetch JSON and write text lists
 use std::env; // Import process environment helpers to read the executable path and optional URLs
 use std::fs; // Import filesystem helpers to create folders and write extracted files
 use std::io::{self, Cursor, Read}; // Import I/O traits and an in-memory cursor for ZIP bytes
 use std::path::{Path, PathBuf}; // Import path types for building output locations safely
+#[cfg(windows)]
+use std::process::Command; // Import process spawning on Windows so we can run PowerShell to edit the user PATH variable
 use zip::ZipArchive; // Import the ZIP reader type so we can unpack the WinDivert archive
 
 const WINDIVERT_ZIP_URL: &str = "https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip"; // Official WinDivert 2.2.2 bundle URL that matches the expected SDK folder name
@@ -65,6 +69,60 @@ fn setup_windivert(install_dir: &Path) -> Result<()> {
     Ok(()) // Signal that WinDivert setup finished successfully
 } // Close the setup_windivert function
 
+#[cfg(windows)]
+const PS_APPEND_USER_PATH: &str = r#"$ErrorActionPreference = 'Stop'
+$install = [System.IO.Path]::GetFullPath('<<ROUST_INSTALL>>')
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($null -eq $userPath) { $userPath = '' }
+$duplicate = $false
+foreach ($segment in ($userPath -split ';')) {
+  if ([string]::IsNullOrWhiteSpace($segment)) { continue }
+  try {
+    $full = [System.IO.Path]::GetFullPath($segment)
+    if ($full -ieq $install) { $duplicate = $true; break }
+  } catch { }
+}
+if (-not $duplicate) {
+  $tail = if ($userPath -eq '' -or $userPath.EndsWith(';')) { '' } else { ';' }
+  [Environment]::SetEnvironmentVariable('Path', ($userPath + $tail + $install), 'User')
+}
+"#; // PowerShell script template that appends the install folder to the per-user PATH if it is missing
+
+#[cfg(windows)]
+fn register_install_dir_on_user_path(install_dir: &Path) -> Result<()> {
+    if env::var("ROUST_SKIP_PATH").is_ok() {
+        eprintln!("ROUST_SKIP_PATH is set so the installer will not change your user PATH variable."); // Explain why PATH registration is being skipped when the opt-out flag is present
+        return Ok(()); // Exit early without touching PATH when the operator asked to skip that step
+    } // Close the skip branch when ROUST_SKIP_PATH is defined
+    let path_utf8 = install_dir.to_str().ok_or_else(|| {
+        anyhow!("install folder path must be UTF-8 so PowerShell can embed it in the PATH update script")
+    })?; // Require a UTF-8 install path because we pass it as text into the PowerShell command string
+    let escaped = path_utf8.replace('\'', "''"); // Escape any single-quote characters the way PowerShell expects inside a single-quoted literal
+    let script = PS_APPEND_USER_PATH.replacen("<<ROUST_INSTALL>>", &escaped, 1); // Inject the escaped install path into the script template exactly once
+    let status = Command::new("powershell.exe") // Launch Windows PowerShell because it can edit the registry-backed user PATH safely
+        .arg("-NoProfile") // Skip loading heavy profiles so the PATH update runs quickly and predictably
+        .arg("-NonInteractive") // Avoid prompts that would block unattended setup runs
+        .arg("-ExecutionPolicy") // Declare how execution policy is handled for this child process
+        .arg("Bypass") // Allow the inline script to run even when default policy would block local scripts
+        .arg("-Command") // Pass the next argument as the PowerShell source text to execute
+        .arg(&script) // Supply the fully expanded script body that updates PATH when needed
+        .status() // Run PowerShell and wait until it exits so we can inspect its exit code
+        .context("failed to start powershell.exe while trying to update the user PATH variable")?; // Convert spawn failures into a descriptive anyhow error chain
+    if !status.success() {
+        anyhow::bail!( // Stop setup with a clear failure when PowerShell reports a non-zero exit status
+            "PATH update via PowerShell failed with status {:?}; you can still run roust.exe using its full path",
+            status.code() // Include the raw exit code in the error for easier diagnosis in logs
+        ); // End the bail macro invocation that returns an error to the caller
+    } // Close the non-success branch for the PowerShell child process
+    Ok(()) // Return success when PATH registration or duplicate detection finished without errors
+} // Close the register_install_dir_on_user_path function
+
+#[cfg(not(windows))]
+fn register_install_dir_on_user_path(_install_dir: &Path) -> Result<()> {
+    eprintln!("Skipping user PATH registration because this build is not running on Windows."); // Tell non-Windows users why no PATH change will occur
+    Ok(()) // Return success immediately on non-Windows hosts where PATH registration does not apply
+} // Close the non-Windows stub implementation
+
 fn main() -> Result<()> {
     let dir = install_dir()?; // Resolve the folder next to this executable that should receive assets
     eprintln!("Using install directory: {}", dir.display()); // Echo the chosen install directory for easier troubleshooting
@@ -78,6 +136,9 @@ fn main() -> Result<()> {
     update::run(&dir).context("Iran aggregated lists (JSON download and TXT files)")?; // Fetch Iran IP JSON and write the four list text files plus a JSON copy
     update::run_private_ips(&dir).context("private IP lists (JSON download and TXT files)")?; // Fetch private IP JSON and write the two private list text files plus a JSON copy
 
+    register_install_dir_on_user_path(&dir).context("add install folder to user PATH for PowerShell and cmd")?; // Append the install directory to the user PATH so typing roust works in new shells
+
+    eprintln!("If PATH was updated, open a new PowerShell window and run `Get-Command roust` to confirm the shell can find roust.exe."); // Remind the operator that existing shells keep their old PATH until restarted
     eprintln!("Setup finished. WinDivert, list files, and logs folder are in {}", dir.display()); // Summarize success and repeat the install root path
     Ok(()) // Exit the program with a success status code
 } // Close the main function
