@@ -15,8 +15,11 @@ use std::path::PathBuf;
   roust ip dest show --ip=192.168.1.100
     Check where 192.168.1.100 will be routed
 
+  roust ip dest add --ip=192.168.1.0/24 --dest=Ethernet --rewrite-to=10.0.0.1
+    Match that range and rewrite IPv4 destination to 10.0.0.1 on reinject
+
   roust ip dest add --ip=192.168.1.0/24 --dest=Ethernet
-    Route all IPs in 192.168.1.0/24 to Ethernet NIC
+    Route all IPs in 192.168.1.0/24 to Ethernet NIC (no destination rewrite)
 
   roust ip dest add --file=private_ips.json --dest=WiFi
     Import routes from a JSON or text file
@@ -90,6 +93,9 @@ pub enum RuleAction {
         ip: Option<String>,
         #[arg(long)]
         nic: Option<String>,
+        /// When set, matching IPv4 packets have their destination address rewritten to this IP
+        #[arg(long)]
+        rewrite_to: Option<String>,
         #[arg(long)]
         file: Option<PathBuf>,
     },
