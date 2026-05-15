@@ -3,6 +3,10 @@ name = "roust"
 version = "0.1.0"
 edition = "2021"
 
+# docs.rs builds with this target so Windows APIs resolve correctly.
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+
 [lib]
 name = "roust"
 path = "src/lib.rs"

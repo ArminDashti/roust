@@ -33,12 +33,15 @@ impl PacketRouter {
         match windivert_ffi::safe::WinDivert::new(filter, 0) {
             Ok(_divert) => {
                 println!("[INFO] WinDivert handle created successfully");
-                println!("[INFO] Loaded {} routing rules", self.config.get_rules().len());
-                
+                println!(
+                    "[INFO] Loaded {} routing rules",
+                    self.config.get_rules().len()
+                );
+
                 for rule in self.config.get_rules() {
                     println!("  - {} → {}", rule.ip, rule.nic);
                 }
-                
+
                 Ok(())
             }
             Err(e) => {
@@ -78,7 +81,12 @@ impl PacketRouter {
             return None;
         }
         let dst_bytes = &packet[16..20];
-        Some(Ipv4Addr::new(dst_bytes[0], dst_bytes[1], dst_bytes[2], dst_bytes[3]))
+        Some(Ipv4Addr::new(
+            dst_bytes[0],
+            dst_bytes[1],
+            dst_bytes[2],
+            dst_bytes[3],
+        ))
     }
 
     /// Extract destination IP from IPv4 packet
@@ -94,7 +102,7 @@ impl PacketRouter {
 
         // Get destination IP
         let dst_ip = Self::extract_dst_ip(packet)?;
-        
+
         // Find routing destination
         let (nic, rewrite_to) = self.config.find_destination(&dst_ip)?;
 
@@ -121,7 +129,7 @@ impl PacketRouter {
                 packet[11] = (checksum & 0xFF) as u8;
             }
         }
-        
+
         Some(nic)
     }
 }
@@ -147,7 +155,13 @@ mod tests {
     #[test]
     fn test_apply_routing_with_rewrite() {
         let mut config = crate::config::Config::new();
-        config.add_rule("192.168.1.0/24".to_string(), "Ethernet".to_string(), Some("10.0.0.1".to_string())).unwrap();
+        config
+            .add_rule(
+                "192.168.1.0/24".to_string(),
+                "Ethernet".to_string(),
+                Some("10.0.0.1".to_string()),
+            )
+            .unwrap();
 
         let router = PacketRouter::new(config);
 
@@ -171,7 +185,6 @@ mod tests {
         assert!(r.is_none());
     }
 
-    #[cfg(windows)]
     #[test]
     fn test_predict_egress_for_public_dns() {
         let router = PacketRouter::new(Config::new());
