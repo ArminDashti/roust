@@ -41,4 +41,11 @@ GitHub Actions builds the same way on `windows-latest`; see `.github/workflows/w
 
 ### Cross-compiling from Linux or macOS
 
-Producing `.exe` with the WinDivert import library is not documented here; use Windows (or a Windows runner) for reliable links.
+The build script rejects non-Windows host targets. From Linux or macOS you can still produce `.exe` files by cross-compiling, for example:
+
+```bash
+rustup target add x86_64-pc-windows-msvc
+cargo build --release --bins --target x86_64-pc-windows-msvc
+```
+
+You still need a Windows linker (for example via `cargo-xwin` or a MSVC toolchain on the host). For the least friction, build on Windows or use the GitHub Actions workflow above.
