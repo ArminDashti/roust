@@ -1,63 +1,187 @@
 mod windivert_ffi;
 
 use crate::config::Config;
-use crate::network::{predict_ipv4_egress, EgressPrediction};
+use crate::network::{enumerate_interfaces, predict_ipv4_egress, EgressPrediction};
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::Arc;
+
+use windivert_ffi::{
+    safe::{self, WinDivertHandle},
+    WinDivertAddress, WINDIVERT_LAYER_NETWORK, WINDIVERT_MTU_MAX, WINDIVERT_SHUTDOWN_RECV,
+};
+
+// ── Global state for the Ctrl-C handler ────────────────────────────────────
+static GLOBAL_RUNNING: AtomicBool = AtomicBool::new(false);
+static GLOBAL_HANDLE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
+    GLOBAL_RUNNING.store(false, Ordering::SeqCst);
+    let handle = GLOBAL_HANDLE.load(Ordering::SeqCst);
+    if !handle.is_null() {
+        windivert_ffi::WinDivertShutdown(handle, WINDIVERT_SHUTDOWN_RECV);
+    }
+    1 // TRUE – handled
+}
 
 pub struct PacketRouter {
     config: Arc<Config>,
     running: Arc<AtomicBool>,
+    nic_index_map: HashMap<String, u32>,
 }
 
 impl PacketRouter {
+    /// Create a router without resolving live NIC indices (useful for tests).
     pub fn new(config: Config) -> Self {
         PacketRouter {
             config: Arc::new(config),
             running: Arc::new(AtomicBool::new(false)),
+            nic_index_map: HashMap::new(),
         }
     }
 
-    pub fn start(&mut self) -> Result<()> {
+    /// Create a router and populate the NIC-name→if_index map from the system.
+    pub fn with_interfaces(config: Config) -> Result<Self> {
+        let interfaces = enumerate_interfaces()?;
+        let mut nic_index_map = HashMap::new();
+        for nic in &interfaces {
+            nic_index_map.insert(nic.name.to_ascii_lowercase(), nic.if_index);
+            nic_index_map.insert(nic.display_name.to_ascii_lowercase(), nic.if_index);
+        }
+        Ok(PacketRouter {
+            config: Arc::new(config),
+            running: Arc::new(AtomicBool::new(false)),
+            nic_index_map,
+        })
+    }
+
+    /// Run the packet capture/reroute loop (blocks until Ctrl-C or error).
+    ///
+    /// For every outbound IPv4 packet:
+    ///   1. Capture it via WinDivert.
+    ///   2. Match its destination against the routing rules.
+    ///   3. If a rule matches, redirect the packet to the target NIC by
+    ///      overwriting `WinDivertAddress.Network.IfIdx`.
+    ///   4. Optionally rewrite the destination IP.
+    ///   5. Recalculate checksums via `WinDivertHelperCalcChecksums`.
+    ///   6. Re-inject the packet.
+    pub fn run(&self) -> Result<()> {
         if self.running.load(Ordering::SeqCst) {
             return Err(anyhow!("Router is already running"));
         }
 
-        self.running.store(true, Ordering::SeqCst);
-        println!("[INFO] Starting packet router...");
-
-        // Create WinDivert handle for capturing outgoing packets
         let filter = "outbound and ip";
-        match windivert_ffi::safe::WinDivert::new(filter, 0) {
-            Ok(_divert) => {
-                println!("[INFO] WinDivert handle created successfully");
-                println!(
-                    "[INFO] Loaded {} routing rules",
-                    self.config.get_rules().len()
-                );
+        let handle = WinDivertHandle::open(filter, WINDIVERT_LAYER_NETWORK, 0, 0)
+            .map_err(|e| anyhow!("{}", e))?;
 
-                for rule in self.config.get_rules() {
-                    println!("  - {} → {}", rule.ip, rule.nic);
+        log::info!(
+            "WinDivert handle opened (filter=\"{}\"), {} routing rules loaded",
+            filter,
+            self.config.get_rules().len()
+        );
+        for rule in self.config.get_rules() {
+            log::info!("  {} → {}", rule.ip, rule.nic);
+        }
+
+        // Publish state so the console Ctrl-C handler can trigger shutdown.
+        self.running.store(true, Ordering::SeqCst);
+        GLOBAL_RUNNING.store(true, Ordering::SeqCst);
+        GLOBAL_HANDLE.store(handle.raw(), Ordering::SeqCst);
+
+        unsafe {
+            windivert_ffi::SetConsoleCtrlHandler(Some(console_ctrl_handler), 1);
+        }
+
+        println!("[roust] Packet router running. Press Ctrl+C to stop.");
+
+        let mut buf = vec![0u8; WINDIVERT_MTU_MAX];
+        let mut addr = WinDivertAddress::zeroed();
+        let mut routed: u64 = 0;
+        let mut passed: u64 = 0;
+
+        loop {
+            if !GLOBAL_RUNNING.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let recv_len = match handle.recv(&mut buf, &mut addr) {
+                Ok(n) => n as usize,
+                Err(e) => {
+                    if !GLOBAL_RUNNING.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    log::error!("WinDivertRecv: {}", e);
+                    continue;
                 }
+            };
 
-                Ok(())
+            let packet = &mut buf[..recv_len];
+            let mut modified = false;
+
+            if let Some(dst_ip) = Self::extract_dst_ipv4(packet) {
+                let dst_str = dst_ip.to_string();
+
+                if let Some((nic_name, rewrite_to)) = self.config.find_destination(&dst_str) {
+                    // Redirect the packet to the matched NIC's interface index.
+                    if let Some(&if_idx) =
+                        self.nic_index_map.get(&nic_name.to_ascii_lowercase())
+                    {
+                        let mut net = addr.network();
+                        net.if_idx = if_idx;
+                        addr.set_network(net);
+                        modified = true;
+
+                        log::debug!("{} → NIC \"{}\" (if_idx={})", dst_str, nic_name, if_idx);
+                    } else {
+                        log::warn!(
+                            "rule matched {} → NIC \"{}\" but that interface was not found",
+                            dst_str,
+                            nic_name
+                        );
+                    }
+
+                    // Optionally rewrite the destination IP inside the packet.
+                    if let Some(new_ip_str) = rewrite_to {
+                        if let Ok(new_ip) = new_ip_str.parse::<Ipv4Addr>() {
+                            let octets = new_ip.octets();
+                            packet[16] = octets[0];
+                            packet[17] = octets[1];
+                            packet[18] = octets[2];
+                            packet[19] = octets[3];
+                            modified = true;
+                        }
+                    }
+
+                    if modified {
+                        let _ = safe::calc_checksums(packet, &mut addr);
+                        routed += 1;
+                    }
+                }
             }
-            Err(e) => {
-                self.running.store(false, Ordering::SeqCst);
-                Err(anyhow!("Failed to initialize WinDivert: {}", e))
+
+            if !modified {
+                passed += 1;
+            }
+
+            // Re-inject every packet (modified or not) so traffic is never dropped.
+            if let Err(e) = handle.send(packet, &addr) {
+                log::error!("WinDivertSend: {}", e);
             }
         }
-    }
 
-    pub fn stop(&mut self) -> Result<()> {
-        if !self.running.load(Ordering::SeqCst) {
-            return Err(anyhow!("Router is not running"));
-        }
-
+        // Cleanup: clear globals and unregister the handler.
+        GLOBAL_HANDLE.store(std::ptr::null_mut(), Ordering::SeqCst);
+        GLOBAL_RUNNING.store(false, Ordering::SeqCst);
         self.running.store(false, Ordering::SeqCst);
-        println!("[INFO] Stopping packet router...");
+
+        println!(
+            "[roust] Stopped. {} packets routed, {} passed through.",
+            routed, passed
+        );
+
+        // `handle` drops here → WinDivertClose is called automatically.
         Ok(())
     }
 
@@ -65,8 +189,8 @@ impl PacketRouter {
         self.running.load(Ordering::SeqCst)
     }
 
-    /// Which local NIC Windows would use for this IPv4 packet's destination, resolved via
-    /// `GetBestRoute` (routing table) before relying on WinDivert `if_idx` on a live packet.
+    /// Which local NIC Windows would use for this IPv4 packet's destination,
+    /// resolved via `GetBestRoute` (routing table).
     pub fn predict_egress_for_packet(&self, packet: &[u8]) -> Result<Option<EgressPrediction>> {
         let Some(dst) = Self::extract_dst_ipv4(packet) else {
             return Ok(None);
@@ -75,35 +199,28 @@ impl PacketRouter {
         Ok(Some(prediction))
     }
 
-    /// Extract destination IPv4 from an IPv4 packet (header only).
     fn extract_dst_ipv4(packet: &[u8]) -> Option<Ipv4Addr> {
         if packet.len() < 20 {
             return None;
         }
-        let dst_bytes = &packet[16..20];
         Some(Ipv4Addr::new(
-            dst_bytes[0],
-            dst_bytes[1],
-            dst_bytes[2],
-            dst_bytes[3],
+            packet[16],
+            packet[17],
+            packet[18],
+            packet[19],
         ))
     }
 
-    /// Extract destination IP from IPv4 packet
     fn extract_dst_ip(packet: &[u8]) -> Option<String> {
         Self::extract_dst_ipv4(packet).map(|ip| ip.to_string())
     }
 
-    /// Modify IPv4 packet destination based on routing rules
     fn apply_routing_rule(&self, packet: &mut [u8]) -> Option<String> {
         if packet.len() < 20 {
             return None;
         }
 
-        // Get destination IP
         let dst_ip = Self::extract_dst_ip(packet)?;
-
-        // Find routing destination
         let (nic, rewrite_to) = self.config.find_destination(&dst_ip)?;
 
         if let Some(new_ip) = rewrite_to {
@@ -114,7 +231,6 @@ impl PacketRouter {
                 packet[18] = octets[2];
                 packet[19] = octets[3];
 
-                // Recalculate IPv4 checksum (basic Internet Checksum)
                 packet[10] = 0;
                 packet[11] = 0;
                 let mut sum: u32 = 0;
@@ -141,7 +257,6 @@ mod tests {
 
     #[test]
     fn test_extract_dst_ip() {
-        // Sample IPv4 packet with destination 192.168.1.100
         let mut packet = vec![0u8; 20];
         packet[16] = 192;
         packet[17] = 168;
@@ -154,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_apply_routing_with_rewrite() {
-        let mut config = crate::config::Config::new();
+        let mut config = Config::new();
         config
             .add_rule(
                 "192.168.1.0/24".to_string(),
