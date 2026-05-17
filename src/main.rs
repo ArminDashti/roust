@@ -157,23 +157,29 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
 fn handle_start_command(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
-    println!("[INFO] Starting router with {} rules...", config.rules.len());
-    // Implementation of router start...
-    Ok(())
+    println!(
+        "[INFO] Loaded {} routing rules from {}",
+        config.rules.len(),
+        config_path.display()
+    );
+    let router = self::core::PacketRouter::with_interfaces(config)
+        .context("enumerate network interfaces for routing")?;
+    router.run()
 }
 
 fn handle_stop_command() -> Result<()> {
-    println!("[INFO] Router stopped.");
+    println!("[INFO] To stop the router, press Ctrl+C in the terminal where 'roust start' is running.");
+    println!("[INFO] Windows Service support for remote stop is planned for a future release.");
     Ok(())
 }
 
 fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
-    handle_stop_command()?;
-    handle_start_command(config_path)?;
-    Ok(())
+    println!("[INFO] Restart: starting a fresh router session.");
+    handle_start_command(config_path)
 }
 
 fn handle_status_command() -> Result<()> {
-    println!("[INFO] Router status: Not running (placeholder).");
+    println!("[INFO] The router runs as a foreground process via 'roust start'.");
+    println!("[INFO] Windows Service support for status queries is planned for a future release.");
     Ok(())
 }
