@@ -9,7 +9,8 @@ use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
 use config::Config;
 use network::enumerate_interfaces;
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
@@ -18,6 +19,8 @@ fn main() -> Result<()> {
     env_logger::Builder::from_default_env()
         .format_timestamp_secs()
         .init();
+
+    bootstrap_runtime_files().context("prepare settings and sqlite runtime files")?;
 
     let cli = parse_cli();
 
@@ -44,6 +47,34 @@ fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn bootstrap_runtime_files() -> Result<()> {
+    let cwd = env::current_dir().context("resolve current directory for runtime bootstrap")?;
+    let settings_path = cwd.join("settings.json");
+    let sqlite_path = cwd.join("roust.sqlite");
+
+    if !settings_path.exists() {
+        let mut settings = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&settings_path)
+            .with_context(|| format!("create {}", settings_path.display()))?;
+        settings
+            .write_all(b"{}\n")
+            .with_context(|| format!("initialize {}", settings_path.display()))?;
+    }
+
+    if !sqlite_path.exists() {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&sqlite_path)
+            .with_context(|| format!("create {}", sqlite_path.display()))?;
+    }
+
+    env::set_var("ROUST_SQLITE_PATH", &sqlite_path);
     Ok(())
 }
 
