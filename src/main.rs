@@ -20,7 +20,7 @@ fn main() -> Result<()> {
         .format_timestamp_secs()
         .init();
 
-    bootstrap_runtime_files().context("prepare settings and sqlite runtime files")?;
+    bootstrap_runtime_files().context("prepare settings runtime file")?;
 
     let cli = parse_cli();
 
@@ -50,10 +50,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+// Ensure settings.json exists in the current working directory before CLI commands run.
 fn bootstrap_runtime_files() -> Result<()> {
     let cwd = env::current_dir().context("resolve current directory for runtime bootstrap")?;
     let settings_path = cwd.join("settings.json");
-    let sqlite_path = cwd.join("roust.sqlite");
 
     if !settings_path.exists() {
         let mut settings = OpenOptions::new()
@@ -66,15 +66,6 @@ fn bootstrap_runtime_files() -> Result<()> {
             .with_context(|| format!("initialize {}", settings_path.display()))?;
     }
 
-    if !sqlite_path.exists() {
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&sqlite_path)
-            .with_context(|| format!("create {}", sqlite_path.display()))?;
-    }
-
-    env::set_var("ROUST_SQLITE_PATH", &sqlite_path);
     Ok(())
 }
 
