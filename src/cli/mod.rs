@@ -46,7 +46,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Path to config file (defaults to routes.json, roust.json, or %ProgramData%\\roust\\routes.json)
+    /// Path to routes file (defaults to routes.json or %ProgramData%\\roust\\routes.json)
     #[arg(global = true, long)]
     pub config: Option<PathBuf>,
 
