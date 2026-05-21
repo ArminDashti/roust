@@ -3,6 +3,18 @@ name = "roust"
 version = "0.1.0"
 edition = "2021"
 
+# docs.rs builds with this target so Windows APIs resolve correctly.
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+
+[lib]
+name = "roust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "roust-setup"
+path = "src/bin/roust-setup.rs"
+
 [dependencies]
 # CLI and argument parsing
 # Pin below 4.6 so clap_derive does not require Cargo's unstable edition2024.
@@ -32,8 +44,13 @@ env_logger = "0.11"
 anyhow = "1.0"
 thiserror = "1.0"
 
-# Ctrl+C while blocking in WinDivertRecv
-ctrlc = "3.4"
+# HTTP (blocking) for `roust update`
+ureq = "2.12"
+
+# ZIP extraction for `roust-setup` (WinDivert distribution); pin 0.6 for Rust 1.83 CI toolchains.
+zip = { version = "=0.6.6", default-features = false, features = ["deflate"] }
+# Pin transitive `url` so `idna_adapter` (Rust 1.86 / edition2024) is not pulled; CI uses Rust 1.83.
+url = "=2.5.0"
 
 # System utilities
 lazy_static = "1.4"

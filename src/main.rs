@@ -1,13 +1,16 @@
 mod cli;
 mod config;
-mod core;
 mod network;
+mod core;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result}; // Import shared error helpers used throughout the CLI binary
+use roust::update; // Import list download helpers from the library crate instead of declaring a local module
 use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
 use config::Config;
 use network::enumerate_interfaces;
-use std::fs;
+use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
@@ -16,6 +19,8 @@ fn main() -> Result<()> {
     env_logger::Builder::from_default_env()
         .format_timestamp_secs()
         .init();
+
+    bootstrap_runtime_files().context("prepare settings and sqlite runtime files")?;
 
     let cli = parse_cli();
 
@@ -32,8 +37,44 @@ fn main() -> Result<()> {
         Commands::Stop => handle_stop_command()?,
         Commands::Restart => handle_restart_command(&config_path)?,
         Commands::Status => handle_status_command()?,
+        Commands::Update => {
+            let out_dir = env::current_dir().context("resolve current directory for roust update")?; // Use the process working directory as the output folder for list files
+            update::run(&out_dir)?; // Download Iran IP JSON via shared library code and rewrite the text list files there
+            println!( // Print a user-visible confirmation listing which files were refreshed
+                "Updated ipv4.txt, ipv6.txt, ipv4_cidr.txt, ipv6_cidr.txt in {}", // Message template naming the four list files and the folder path
+                out_dir.display() // Provide the display form of the output directory for the placeholder in the template
+            ); // Finish the println macro call after printing the update summary line
+        }
     }
 
+    Ok(())
+}
+
+fn bootstrap_runtime_files() -> Result<()> {
+    let cwd = env::current_dir().context("resolve current directory for runtime bootstrap")?;
+    let settings_path = cwd.join("settings.json");
+    let sqlite_path = cwd.join("roust.sqlite");
+
+    if !settings_path.exists() {
+        let mut settings = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&settings_path)
+            .with_context(|| format!("create {}", settings_path.display()))?;
+        settings
+            .write_all(b"{}\n")
+            .with_context(|| format!("initialize {}", settings_path.display()))?;
+    }
+
+    if !sqlite_path.exists() {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&sqlite_path)
+            .with_context(|| format!("create {}", sqlite_path.display()))?;
+    }
+
+    env::set_var("ROUST_SQLITE_PATH", &sqlite_path);
     Ok(())
 }
 
@@ -83,13 +124,7 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
 }
 
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule {
-        ip,
-        nic,
-        file,
-        rewrite_to,
-    } = action
-    {
+    if let RuleAction::Rule { ip, nic, file } = action {
         let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
 
         if let Some(dest) = nic {
@@ -111,10 +146,10 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
                 };
 
                 for ip_str in ips {
-                    config.add_rule(ip_str, dest.clone(), rewrite_to.clone())?;
+                    config.add_rule(ip_str, dest.clone(), None)?;
                 }
             } else if let Some(ip_addr) = ip {
-                config.add_rule(ip_addr, dest, rewrite_to)?;
+                config.add_rule(ip_addr, dest, None)?;
             }
             config.save(config_path)?;
             println!("Rule(s) added successfully.");
@@ -154,33 +189,28 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 fn handle_start_command(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
     println!(
-        "[INFO] WinDivert intercept: {} rule(s). Ctrl+C to stop.",
-        config.rules.len()
+        "[INFO] Loaded {} routing rules from {}",
+        config.rules.len(),
+        config_path.display()
     );
-    for rule in &config.rules {
-        let rw = rule
-            .rewrite_to
-            .as_deref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "(none)".to_string());
-        println!("  - {} → {}  rewrite_to={}", rule.ip, rule.nic, rw);
-    }
-    let router = core::PacketRouter::new(config);
-    router.start_blocking()
+    let router = self::core::PacketRouter::with_interfaces(config)
+        .context("enumerate network interfaces for routing")?;
+    router.run()
 }
 
 fn handle_stop_command() -> Result<()> {
-    println!("[INFO] Stop is not available as a separate process; press Ctrl+C in the terminal running `roust start`.");
+    println!("[INFO] To stop the router, press Ctrl+C in the terminal where 'roust start' is running.");
+    println!("[INFO] Windows Service support for remote stop is planned for a future release.");
     Ok(())
 }
 
 fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
-    handle_stop_command()?;
-    handle_start_command(config_path)?;
-    Ok(())
+    println!("[INFO] Restart: starting a fresh router session.");
+    handle_start_command(config_path)
 }
 
 fn handle_status_command() -> Result<()> {
-    println!("[INFO] When `roust start` is running, the router is active in that process.");
+    println!("[INFO] The router runs as a foreground process via 'roust start'.");
+    println!("[INFO] Windows Service support for status queries is planned for a future release.");
     Ok(())
 }

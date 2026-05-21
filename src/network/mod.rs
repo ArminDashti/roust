@@ -26,15 +26,8 @@ pub struct EgressPrediction {
     pub nic_display: Option<String>,
 }
 
-#[cfg(windows)]
 mod win;
-#[cfg(windows)]
 pub use win::{enumerate_interfaces, get_interface, interface_exists, predict_ipv4_egress};
-
-#[cfg(not(windows))]
-mod stub;
-#[cfg(not(windows))]
-pub use stub::{enumerate_interfaces, predict_ipv4_egress};
 
 #[cfg(test)]
 mod tests {
@@ -48,7 +41,10 @@ mod tests {
                 for nic in &interfaces {
                     println!("  - {} ({})", nic.name, nic.display_name);
                 }
-                assert!(!interfaces.is_empty(), "Should have at least one NIC on Windows");
+                assert!(
+                    !interfaces.is_empty(),
+                    "Should have at least one NIC on Windows"
+                );
             }
             Err(e) => {
                 println!("Error enumerating interfaces: {:?}", e);
