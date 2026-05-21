@@ -29,7 +29,7 @@ impl Config {
         Config { rules: vec![] }
     }
 
-    /// Load configuration from a JSON file
+    /// Load configuration from a JSON file (`roust.json` or `routes.json` formats).
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -37,18 +37,76 @@ impl Config {
         }
 
         let contents = fs::read_to_string(path)?;
-        let config: Config = serde_json::from_str(&contents)?;
-        Ok(config)
+        Self::from_json_str(&contents)
     }
 
-    /// Save configuration to a JSON file
+    /// Parse config JSON: `{ "rules": [...] }` or a top-level `[{ "ip", "nic", ... }]`.
+    pub fn from_json_str(contents: &str) -> Result<Self> {
+        if let Ok(config) = serde_json::from_str::<Config>(contents) {
+            return Ok(config);
+        }
+
+        let rules: Vec<RoutingRule> = serde_json::from_str(contents)
+            .map_err(|e| anyhow!("invalid routing JSON (expected {{\"rules\":[...]}} or [{{\"ip\",\"nic\"}}]): {e}"))?;
+        Ok(Config { rules })
+    }
+
+    /// Parse a bulk-import file: JSON array of CIDR strings, or `routes.json` objects with `ip` and `nic`.
+    pub fn parse_import_file(contents: &str, path: &Path) -> Result<Vec<RoutingRule>> {
+        let is_json = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+
+        if is_json {
+            if let Ok(rules) = serde_json::from_str::<Vec<RoutingRule>>(contents) {
+                return Ok(rules);
+            }
+
+            let ips: Vec<String> = serde_json::from_str(contents).map_err(|e| {
+                anyhow!(
+                    "JSON import must be [\"cidr\", ...] or [{{\"ip\":\"...\",\"nic\":\"...\"}}]: {e}"
+                )
+            })?;
+            return Ok(ips
+                .into_iter()
+                .map(|ip| RoutingRule {
+                    ip,
+                    nic: String::new(),
+                    rewrite_to: None,
+                })
+                .collect());
+        }
+
+        Ok(contents
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(|ip| RoutingRule {
+                ip: ip.to_string(),
+                nic: String::new(),
+                rewrite_to: None,
+            })
+            .collect())
+    }
+
+    /// Save configuration to a JSON file (`routes.json` is written as a `[{ip,nic}]` array).
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let json = serde_json::to_string_pretty(&self)?;
+        let use_routes_array = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case("routes.json"));
+
+        let json = if use_routes_array {
+            serde_json::to_string_pretty(&self.rules)?
+        } else {
+            serde_json::to_string_pretty(self)?
+        };
         fs::write(path, json)?;
         Ok(())
     }
@@ -127,22 +185,30 @@ impl Config {
         self.rules.clear();
     }
 
-    /// Get config path - tries common locations
+    /// Get config path — prefers `routes.json`, then legacy `roust.json` / ProgramData paths.
     pub fn default_config_path() -> PathBuf {
-        // Try %ProgramData%\roust\config.json first
-        let program_data = std::env::var("ProgramData")
+        let program_data_root = std::env::var("ProgramData")
             .ok()
             .map(PathBuf::from)
-            .map(|p| p.join("roust").join("config.json"));
+            .map(|p| p.join("roust"));
 
-        if let Some(path) = program_data {
+        if let Some(root) = &program_data_root {
+            for name in ["routes.json", "config.json"] {
+                let path = root.join(name);
+                if path.exists() {
+                    return path;
+                }
+            }
+        }
+
+        for name in ["routes.json", "roust.json"] {
+            let path = PathBuf::from(name);
             if path.exists() {
                 return path;
             }
         }
 
-        // Fall back to ./roust.json
-        PathBuf::from("roust.json")
+        PathBuf::from("routes.json")
     }
 }
 
@@ -176,6 +242,33 @@ mod tests {
         let config = Config::new();
         assert!(config.ip_matches("*", "192.168.1.100"));
         assert!(config.ip_matches("*", "10.0.0.1"));
+    }
+
+    #[test]
+    fn test_load_routes_json_array_format() {
+        let json = r#"[
+            {"ip": "10.0.0.0/8", "nic": "Ethernet"},
+            {"ip": "192.168.0.0/16", "nic": "Wi-Fi"}
+        ]"#;
+        let config = Config::from_json_str(json).unwrap();
+        assert_eq!(config.rules.len(), 2);
+        assert_eq!(config.rules[0].ip, "10.0.0.0/8");
+        assert_eq!(config.rules[0].nic, "Ethernet");
+    }
+
+    #[test]
+    fn test_parse_import_routes_objects() {
+        let json = r#"[{"ip":"172.16.0.0/12","nic":"Ethernet"}]"#;
+        let rules = Config::parse_import_file(json, Path::new("routes.json")).unwrap();
+        assert_eq!(rules[0].nic, "Ethernet");
+    }
+
+    #[test]
+    fn test_parse_import_cidr_string_array() {
+        let json = r#"["10.0.0.0/8"]"#;
+        let rules = Config::parse_import_file(json, Path::new("list.json")).unwrap();
+        assert_eq!(rules[0].ip, "10.0.0.0/8");
+        assert!(rules[0].nic.is_empty());
     }
 
     #[test]

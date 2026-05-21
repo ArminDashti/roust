@@ -126,34 +126,51 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     if let RuleAction::Rule { ip, nic, file, rewrite_to } = action {
         let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
+        let interfaces = enumerate_interfaces()?;
 
-        if let Some(dest) = nic {
-            let nics = enumerate_interfaces()?;
-            if !nics.iter().any(|n| n.name.eq_ignore_ascii_case(&dest)) {
-                return Err(anyhow!("Interface '{}' not found", dest));
+        let validate_nic = |nic_name: &str| -> Result<()> {
+            if interfaces
+                .iter()
+                .any(|n| n.name.eq_ignore_ascii_case(nic_name))
+            {
+                Ok(())
+            } else {
+                Err(anyhow!("Interface '{}' not found", nic_name))
             }
+        };
 
-            if let Some(file_path) = file {
-                let content = fs::read_to_string(&file_path)?;
-                let ips: Vec<String> = if file_path.extension().map_or(false, |ext| ext == "json") {
-                    serde_json::from_str(&content)?
+        if let Some(file_path) = file {
+            let content = fs::read_to_string(&file_path)?;
+            let imported = Config::parse_import_file(&content, &file_path)?;
+
+            for rule in imported {
+                let dest = if rule.nic.is_empty() {
+                    nic.as_ref()
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Each entry in {} needs a \"nic\", or pass --nic for IP-only lists",
+                                file_path.display()
+                            )
+                        })?
+                        .clone()
                 } else {
-                    content
-                        .lines()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
+                    rule.nic
                 };
-
-                for ip_str in ips {
-                    config.add_rule(ip_str, dest.clone(), rewrite_to.clone())?;
-                }
-            } else if let Some(ip_addr) = ip {
-                config.add_rule(ip_addr, dest, rewrite_to)?;
+                validate_nic(&dest)?;
+                let rule_rewrite = rule.rewrite_to.or_else(|| rewrite_to.clone());
+                config.add_rule(rule.ip, dest, rule_rewrite)?;
             }
-            config.save(config_path)?;
-            println!("Rule(s) added successfully.");
+        } else if let (Some(ip_addr), Some(dest)) = (ip, nic) {
+            validate_nic(&dest)?;
+            config.add_rule(ip_addr, dest, rewrite_to)?;
+        } else {
+            return Err(anyhow!(
+                "Provide --ip and --nic, or --file (e.g. routes.json with ip and nic per entry)"
+            ));
         }
+
+        config.save(config_path)?;
+        println!("Rule(s) added successfully.");
     }
     Ok(())
 }

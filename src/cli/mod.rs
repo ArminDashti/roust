@@ -21,8 +21,11 @@ use std::path::PathBuf;
   roust ip dest add --ip=192.168.1.0/24 --dest=Ethernet
     Route all IPs in 192.168.1.0/24 to Ethernet NIC (no destination rewrite)
 
-  roust ip dest add --file=private_ips.json --dest=WiFi
-    Import routes from a JSON or text file
+  roust add --file=routes.json
+    Import routes.json entries (each object has ip and nic fields)
+
+  roust add --file=private_ips.json --nic WiFi
+    Import CIDR strings from a JSON/text file using one NIC for all entries
 
   roust ip dest list
     Show all configured routing rules
@@ -43,7 +46,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Path to config file (defaults to roust.json or %ProgramData%\roust\config.json)
+    /// Path to config file (defaults to routes.json, roust.json, or %ProgramData%\\roust\\routes.json)
     #[arg(global = true, long)]
     pub config: Option<PathBuf>,
 
