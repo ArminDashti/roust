@@ -144,12 +144,16 @@ impl PacketRouter {
 
                     // Optionally rewrite the destination IP inside the packet.
                     if let Some(new_ip_str) = rewrite_to {
-                        if let Ok(new_ip) = new_ip_str.parse::<Ipv4Addr>() {
+                        if let (Ok(new_ip), Some(ihl)) =
+                            (new_ip_str.parse::<Ipv4Addr>(), Self::ipv4_header_len(packet))
+                        {
+                            let o = ihl - 4;
                             let octets = new_ip.octets();
-                            packet[16] = octets[0];
-                            packet[17] = octets[1];
-                            packet[18] = octets[2];
-                            packet[19] = octets[3];
+                            packet[o] = octets[0];
+                            packet[o + 1] = octets[1];
+                            packet[o + 2] = octets[2];
+                            packet[o + 3] = octets[3];
+                            Self::recalc_ipv4_header_checksum(packet, ihl);
                             modified = true;
                         }
                     }
@@ -199,16 +203,45 @@ impl PacketRouter {
         Ok(Some(prediction))
     }
 
-    fn extract_dst_ipv4(packet: &[u8]) -> Option<Ipv4Addr> {
-        if packet.len() < 20 {
+    fn ipv4_header_len(packet: &[u8]) -> Option<usize> {
+        let first = *packet.first()?;
+        if (first >> 4) != 4 {
             return None;
         }
+        let ihl = ((first & 0x0f) as usize) * 4;
+        if ihl < 20 || packet.len() < ihl {
+            return None;
+        }
+        Some(ihl)
+    }
+
+    fn extract_dst_ipv4(packet: &[u8]) -> Option<Ipv4Addr> {
+        let ihl = Self::ipv4_header_len(packet)?;
+        let o = ihl - 4;
         Some(Ipv4Addr::new(
-            packet[16],
-            packet[17],
-            packet[18],
-            packet[19],
+            packet[o],
+            packet[o + 1],
+            packet[o + 2],
+            packet[o + 3],
         ))
+    }
+
+    fn recalc_ipv4_header_checksum(packet: &mut [u8], header_len: usize) {
+        if header_len < 20 || packet.len() < header_len {
+            return;
+        }
+        packet[10] = 0;
+        packet[11] = 0;
+        let mut sum: u32 = 0;
+        for i in (0..header_len).step_by(2) {
+            sum += ((packet[i] as u32) << 8) | (packet[i + 1] as u32);
+        }
+        while (sum >> 16) != 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        let checksum = !(sum as u16);
+        packet[10] = (checksum >> 8) as u8;
+        packet[11] = (checksum & 0xFF) as u8;
     }
 
     fn extract_dst_ip(packet: &[u8]) -> Option<String> {
@@ -216,33 +249,18 @@ impl PacketRouter {
     }
 
     fn apply_routing_rule(&self, packet: &mut [u8]) -> Option<String> {
-        if packet.len() < 20 {
-            return None;
-        }
-
         let dst_ip = Self::extract_dst_ip(packet)?;
         let (nic, rewrite_to) = self.config.find_destination(&dst_ip)?;
 
         if let Some(new_ip) = rewrite_to {
-            if let Ok(ip) = new_ip.parse::<Ipv4Addr>() {
+            if let (Ok(ip), Some(ihl)) = (new_ip.parse::<Ipv4Addr>(), Self::ipv4_header_len(packet)) {
+                let o = ihl - 4;
                 let octets = ip.octets();
-                packet[16] = octets[0];
-                packet[17] = octets[1];
-                packet[18] = octets[2];
-                packet[19] = octets[3];
-
-                packet[10] = 0;
-                packet[11] = 0;
-                let mut sum: u32 = 0;
-                for i in (0..20).step_by(2) {
-                    sum += ((packet[i] as u32) << 8) | (packet[i + 1] as u32);
-                }
-                while (sum >> 16) != 0 {
-                    sum = (sum & 0xFFFF) + (sum >> 16);
-                }
-                let checksum = !(sum as u16);
-                packet[10] = (checksum >> 8) as u8;
-                packet[11] = (checksum & 0xFF) as u8;
+                packet[o] = octets[0];
+                packet[o + 1] = octets[1];
+                packet[o + 2] = octets[2];
+                packet[o + 3] = octets[3];
+                Self::recalc_ipv4_header_checksum(packet, ihl);
             }
         }
 
@@ -258,6 +276,7 @@ mod tests {
     #[test]
     fn test_extract_dst_ip() {
         let mut packet = vec![0u8; 20];
+        packet[0] = 0x45;
         packet[16] = 192;
         packet[17] = 168;
         packet[18] = 1;
@@ -281,6 +300,7 @@ mod tests {
         let router = PacketRouter::new(config);
 
         let mut packet = vec![0u8; 20];
+        packet[0] = 0x45;
         packet[16] = 192;
         packet[17] = 168;
         packet[18] = 1;
