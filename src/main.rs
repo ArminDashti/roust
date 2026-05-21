@@ -124,7 +124,7 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
 }
 
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule { ip, nic, file } = action {
+    if let RuleAction::Rule { ip, nic, file, rewrite_to } = action {
         let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
 
         if let Some(dest) = nic {
@@ -146,10 +146,10 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
                 };
 
                 for ip_str in ips {
-                    config.add_rule(ip_str, dest.clone(), None)?;
+                    config.add_rule(ip_str, dest.clone(), rewrite_to.clone())?;
                 }
             } else if let Some(ip_addr) = ip {
-                config.add_rule(ip_addr, dest, None)?;
+                config.add_rule(ip_addr, dest, rewrite_to)?;
             }
             config.save(config_path)?;
             println!("Rule(s) added successfully.");
@@ -174,11 +174,11 @@ fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 }
 
 fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule { ip, nic, .. } = action {
+    if let RuleAction::Rule { ip, nic, rewrite_to, .. } = action {
         if let (Some(ip_addr), Some(new_nic)) = (ip, nic) {
             let mut config = Config::load(config_path)?;
             config.remove_rule(&ip_addr);
-            config.add_rule(ip_addr, new_nic, None)?;
+            config.add_rule(ip_addr, new_nic, rewrite_to)?;
             config.save(config_path)?;
             println!("Rule edited successfully.");
         }
