@@ -209,10 +209,8 @@ Uses legacy `GetAdaptersInfo` to collect:
 On every `roust` launch, `main` ensures in the **current directory**:
 
 - `settings.json` — created as `{}` if missing  
-- `roust.sqlite` — created empty if missing  
-- `ROUST_SQLITE_PATH` env var set to the sqlite path  
 
-These files are placeholders for future persistence; the active routing config is `routes.json` (or the path passed via `--config`).
+This file is a placeholder for future persistence; the active routing config is `routes.json` (or the path passed via `--config`).
 
 ## Setup and installation (`roust-setup`)
 
@@ -242,7 +240,6 @@ The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\rous
 | `ROUST_WINDIVERT_ZIP_URL` | WinDivert ZIP URL for setup |
 | `ROUST_IR_AGGREGATED_JSON_URL` | Iran IP JSON source for `update` |
 | `ROUST_PRIVATE_IPS_JSON_URL` | Private IP JSON source |
-| `ROUST_SQLITE_PATH` | Set at runtime to local `roust.sqlite` |
 | `ROUST_INSTALL_RUST` / `ROUST_SKIP_*` | Control setup steps (lists, path, windivert, rust) |
 | `RUST_LOG` | Standard `env_logger` filter for verbose diagnostics |
 
@@ -277,7 +274,7 @@ roust update
 ## Planned / partial features
 
 - Windows Service for `stop` / `status` / `restart` without a foreground terminal (`windows-service` dependency is already in `Cargo.toml`).  
-- Deeper use of `settings.json` and `roust.sqlite` for state beyond routing rules.  
+- Deeper use of `settings.json` for state beyond routing rules.  
 - CLI help examples reference `roust ip dest …` style commands; the implemented surface uses `add` / `delete` / `edit` with `--ip` and `--nic` flags (see `src/cli/mod.rs`).
 
 ## Related files
