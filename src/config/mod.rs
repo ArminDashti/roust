@@ -1,9 +1,39 @@
 use anyhow::{anyhow, Result};
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+
+/// Pre-parsed match pattern used on the packet hot path (no JSON or CIDR parsing per packet).
+#[derive(Debug, Clone)]
+pub enum IpMatch {
+    Wildcard,
+    Exact(Ipv4Addr),
+    Network(IpNetwork),
+}
+
+/// One routing rule with NIC resolved to `if_index` at startup; kept entirely in memory while running.
+#[derive(Debug, Clone)]
+pub struct CompiledRule {
+    pub ip_label: String,
+    pub nic: String,
+    pub match_pattern: IpMatch,
+    pub if_index: u32,
+    pub rewrite_to: Option<Ipv4Addr>,
+}
+
+impl CompiledRule {
+    /// Return true when this rule's pattern matches the destination IPv4 address.
+    pub fn matches(&self, dest: Ipv4Addr) -> bool {
+        match &self.match_pattern {
+            IpMatch::Wildcard => true,
+            IpMatch::Exact(addr) => *addr == dest,
+            IpMatch::Network(network) => network.contains(IpAddr::V4(dest)),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoutingRule {
     pub ip: String,
@@ -123,6 +153,66 @@ impl Config {
     pub fn get_rules(&self) -> &[RoutingRule] {
         &self.rules
     }
+
+    /// Build an in-memory routing table: parse each rule once and map NIC name → interface index.
+    pub fn compile_rules(
+        &self,
+        nic_index_map: &HashMap<String, u32>,
+    ) -> Result<Vec<CompiledRule>> {
+        let mut compiled = Vec::with_capacity(self.rules.len());
+        for rule in &self.rules {
+            let match_pattern = Self::compile_match_pattern(&rule.ip)?;
+            let if_index = nic_index_map
+                .get(&rule.nic.to_ascii_lowercase())
+                .copied()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "routing rule {} → NIC \"{}\" has no matching interface on this machine",
+                        rule.ip,
+                        rule.nic
+                    )
+                })?;
+            let rewrite_to = rule
+                .rewrite_to
+                .as_ref()
+                .map(|s| {
+                    s.parse::<Ipv4Addr>().map_err(|e| {
+                        anyhow!("invalid rewrite_to \"{s}\" on rule {}: {e}", rule.ip)
+                    })
+                })
+                .transpose()?;
+            compiled.push(CompiledRule {
+                ip_label: rule.ip.clone(),
+                nic: rule.nic.clone(),
+                match_pattern,
+                if_index,
+                rewrite_to,
+            });
+        }
+        Ok(compiled)
+    }
+
+    /// Look up the first matching compiled rule for a destination IPv4 (in-memory only).
+    pub fn find_compiled<'a>(
+        compiled: &'a [CompiledRule],
+        dest: Ipv4Addr,
+    ) -> Option<&'a CompiledRule> {
+        compiled.iter().find(|rule| rule.matches(dest))
+    }
+
+    fn compile_match_pattern(ip: &str) -> Result<IpMatch> {
+        if ip == "*" {
+            return Ok(IpMatch::Wildcard);
+        }
+        if let Ok(network) = ip.parse::<IpNetwork>() {
+            return Ok(IpMatch::Network(network));
+        }
+        let addr: Ipv4Addr = ip
+            .parse()
+            .map_err(|e| anyhow!("invalid IPv4 or CIDR in routing rule \"{ip}\": {e}"))?;
+        Ok(IpMatch::Exact(addr))
+    }
+
     #[allow(dead_code)]
     pub fn clear_rules(&mut self) {
         self.rules.clear();
@@ -191,6 +281,33 @@ mod tests {
         assert_eq!(rules[0].ip, "10.0.0.0/8");
         assert!(rules[0].nic.is_empty());
     }
+    #[test]
+    fn test_compile_rules_resolves_if_index() {
+        let mut config = Config::new();
+        config
+            .add_rule("10.0.0.0/8".to_string(), "Ethernet".to_string(), None)
+            .unwrap();
+        let mut nic_map = HashMap::new();
+        nic_map.insert("ethernet".to_string(), 42);
+        let compiled = config.compile_rules(&nic_map).unwrap();
+        assert_eq!(compiled[0].if_index, 42);
+        assert!(compiled[0].matches(Ipv4Addr::new(10, 1, 2, 3)));
+    }
+
+    #[test]
+    fn test_find_compiled() {
+        let mut config = Config::new();
+        config
+            .add_rule("192.168.1.0/24".to_string(), "Ethernet".to_string(), None)
+            .unwrap();
+        let mut nic_map = HashMap::new();
+        nic_map.insert("ethernet".to_string(), 1);
+        let compiled = config.compile_rules(&nic_map).unwrap();
+        let hit = Config::find_compiled(&compiled, Ipv4Addr::new(192, 168, 1, 50));
+        assert!(hit.is_some());
+        assert_eq!(hit.unwrap().if_index, 1);
+    }
+
     #[test]
     fn test_find_destination() {
         let mut config = Config::new();
