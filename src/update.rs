@@ -45,8 +45,8 @@ pub fn run(out_dir: &Path) -> Result<()> {
     let ipv6_plain: Vec<String> = ipv6_cidr.iter().map(|s| strip_subnet(s)).collect(); // Build host-only IPv6 strings by stripping any slash suffix from each CIDR
 
     let files: [(&str, &[String]); 4] = [
-        ("ipv4-cidr.txt", &ipv4_cidr), // Map the first output filename to the IPv4 CIDR vector slice
-        ("ipv6-cidr.txt", &ipv6_cidr), // Map the second output filename to the IPv6 CIDR vector slice
+        ("ipv4_cidr.txt", &ipv4_cidr), // Map the first output filename to the IPv4 CIDR vector slice
+        ("ipv6_cidr.txt", &ipv6_cidr), // Map the second output filename to the IPv6 CIDR vector slice
         ("ipv4.txt", &ipv4_plain), // Map the third output filename to the plain IPv4 host strings slice
         ("ipv6.txt", &ipv6_plain), // Map the fourth output filename to the plain IPv6 host strings slice
     ]; // Close the static table that drives file generation
@@ -87,7 +87,7 @@ pub fn run_private_ips(out_dir: &Path) -> Result<()> {
 
     let plain: Vec<String> = cidrs.iter().map(|s| strip_subnet(s)).collect(); // Convert each CIDR into a host-only string for the plain list output
 
-    let files: [(&str, &[String]); 2] = [("private_ips-cidr.txt", &cidrs), ("private_ips.txt", &plain)]; // Declare the two private list files and their backing slices
+    let files: [(&str, &[String]); 2] = [("private_ips_cidr.txt", &cidrs), ("private_ips.txt", &plain)]; // Declare the two private list files and their backing slices
 
     for (name, _) in &files {
         let path = out_dir.join(name); // Build the full path for each private list file we are refreshing
