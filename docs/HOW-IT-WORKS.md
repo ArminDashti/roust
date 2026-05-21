@@ -67,7 +67,7 @@ Cargo is configured for **Windows MSVC only** (`build.rs` panics on non-Windows 
 | Module | Responsibility |
 |--------|----------------|
 | `cli/` | Clap command tree and global `--config` / `--verbose` |
-| `config/` | `roust.json` (or `%ProgramData%\roust\config.json`) — rules as JSON |
+| `config/` | `routes.json` (or `%ProgramData%\roust\routes.json`) — rules as JSON array |
 | `network/` | `GetAdaptersInfo`, `GetBestRoute`, egress prediction |
 | `core/` | `PacketRouter` + WinDivert FFI and safe handle wrapper |
 | `update/` | Download Iran aggregated blocks and private IP lists |
@@ -75,25 +75,23 @@ Cargo is configured for **Windows MSVC only** (`build.rs` panics on non-Windows 
 
 ## Configuration model
 
-Rules live in a JSON file. Default resolution order:
+Rules live in `routes.json`. Default resolution order:
 
-1. `%ProgramData%\roust\config.json` if it exists  
-2. Otherwise `./roust.json` in the current working directory  
+1. `%ProgramData%\roust\routes.json` if it exists  
+2. Otherwise `./routes.json` in the current working directory (created on first `add` if missing)
 
 You can override with `--config <path>`.
 
 ### Rule shape
 
 ```json
-{
-  "rules": [
-    {
-      "ip": "192.168.1.0/24",
-      "nic": "Ethernet",
-      "rewrite_to": "10.0.0.1"
-    }
-  ]
-}
+[
+  {
+    "ip": "192.168.1.0/24",
+    "nic": "Ethernet",
+    "rewrite_to": "10.0.0.1"
+  }
+]
 ```
 
 | Field | Meaning |
@@ -214,7 +212,7 @@ On every `roust` launch, `main` ensures in the **current directory**:
 - `roust.sqlite` — created empty if missing  
 - `ROUST_SQLITE_PATH` env var set to the sqlite path  
 
-These files are placeholders for future persistence; the active routing config is still `roust.json` / ProgramData path.
+These files are placeholders for future persistence; the active routing config is `routes.json` (or the path passed via `--config`).
 
 ## Setup and installation (`roust-setup`)
 

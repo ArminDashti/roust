@@ -29,7 +29,7 @@ impl Config {
         Config { rules: vec![] }
     }
 
-    /// Load configuration from a JSON file (`roust.json` or `routes.json` formats).
+    /// Load routing rules from `routes.json` (top-level `[{ "ip", "nic", ... }]` array).
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -40,14 +40,11 @@ impl Config {
         Self::from_json_str(&contents)
     }
 
-    /// Parse config JSON: `{ "rules": [...] }` or a top-level `[{ "ip", "nic", ... }]`.
+    /// Parse a routes file: top-level `[{ "ip", "nic", ... }]`.
     pub fn from_json_str(contents: &str) -> Result<Self> {
-        if let Ok(config) = serde_json::from_str::<Config>(contents) {
-            return Ok(config);
-        }
-
-        let rules: Vec<RoutingRule> = serde_json::from_str(contents)
-            .map_err(|e| anyhow!("invalid routing JSON (expected {{\"rules\":[...]}} or [{{\"ip\",\"nic\"}}]): {e}"))?;
+        let rules: Vec<RoutingRule> = serde_json::from_str(contents).map_err(|e| {
+            anyhow!("invalid routes JSON (expected [{{\"ip\":\"...\",\"nic\":\"...\"}}]): {e}")
+        })?;
         Ok(Config { rules })
     }
 
@@ -90,23 +87,14 @@ impl Config {
             .collect())
     }
 
-    /// Save configuration to a JSON file (`routes.json` is written as a `[{ip,nic}]` array).
+    /// Save routing rules as a `[{ip,nic,...}]` JSON array.
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let use_routes_array = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.eq_ignore_ascii_case("routes.json"));
-
-        let json = if use_routes_array {
-            serde_json::to_string_pretty(&self.rules)?
-        } else {
-            serde_json::to_string_pretty(self)?
-        };
+        let json = serde_json::to_string_pretty(&self.rules)?;
         fs::write(path, json)?;
         Ok(())
     }
@@ -185,27 +173,20 @@ impl Config {
         self.rules.clear();
     }
 
-    /// Get config path — prefers `routes.json`, then legacy `roust.json` / ProgramData paths.
+    /// Default routes file: `%ProgramData%\\roust\\routes.json` if present, else `.\\routes.json`.
     pub fn default_config_path() -> PathBuf {
-        let program_data_root = std::env::var("ProgramData")
-            .ok()
-            .map(PathBuf::from)
-            .map(|p| p.join("roust"));
-
-        if let Some(root) = &program_data_root {
-            for name in ["routes.json", "config.json"] {
-                let path = root.join(name);
-                if path.exists() {
-                    return path;
-                }
-            }
-        }
-
-        for name in ["routes.json", "roust.json"] {
-            let path = PathBuf::from(name);
+        if let Ok(program_data) = std::env::var("ProgramData") {
+            let path = PathBuf::from(program_data)
+                .join("roust")
+                .join("routes.json");
             if path.exists() {
                 return path;
             }
+        }
+
+        let cwd_routes = PathBuf::from("routes.json");
+        if cwd_routes.exists() {
+            return cwd_routes;
         }
 
         PathBuf::from("routes.json")
