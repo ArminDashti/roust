@@ -179,7 +179,7 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 fn handle_start_command(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
     println!(
-        "[INFO] Loaded {} routing rules from {}",
+        "[INFO] Loaded {} routing rules from {} (compiling NIC → if_index in memory)",
         config.rules.len(),
         config_path.display()
     );

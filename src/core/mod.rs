@@ -1,5 +1,5 @@
 mod windivert_ffi;
-use crate::config::Config;
+use crate::config::{CompiledRule, Config};
 use crate::network::{enumerate_interfaces, predict_ipv4_egress, EgressPrediction};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
@@ -23,16 +23,26 @@ unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
 pub struct PacketRouter {
     config: Arc<Config>,
     running: Arc<AtomicBool>,
-    nic_index_map: HashMap<String, u32>,
+    /// Rules loaded from routes.json once at start, with NIC names already resolved to if_index.
+    compiled_rules: Vec<CompiledRule>,
 }
 impl PacketRouter {
     pub fn new(config: Config) -> Self {
         PacketRouter {
             config: Arc::new(config),
             running: Arc::new(AtomicBool::new(false)),
-            nic_index_map: HashMap::new(),
+            compiled_rules: Vec::new(),
         }
     }
+    #[cfg(test)]
+    pub fn with_compiled_rules(config: Config, compiled_rules: Vec<CompiledRule>) -> Self {
+        PacketRouter {
+            config: Arc::new(config),
+            running: Arc::new(AtomicBool::new(false)),
+            compiled_rules,
+        }
+    }
+
     pub fn with_interfaces(config: Config) -> Result<Self> {
         let interfaces = enumerate_interfaces()?;
         let mut nic_index_map = HashMap::new();
@@ -40,10 +50,11 @@ impl PacketRouter {
             nic_index_map.insert(nic.name.to_ascii_lowercase(), nic.if_index);
             nic_index_map.insert(nic.display_name.to_ascii_lowercase(), nic.if_index);
         }
+        let compiled_rules = config.compile_rules(&nic_index_map)?;
         Ok(PacketRouter {
             config: Arc::new(config),
             running: Arc::new(AtomicBool::new(false)),
-            nic_index_map,
+            compiled_rules,
         })
     }
     pub fn run(&self) -> Result<()> {
@@ -58,8 +69,13 @@ impl PacketRouter {
             filter,
             self.config.get_rules().len()
         );
-        for rule in self.config.get_rules() {
-            log::info!("  {} → {}", rule.ip, rule.nic);
+        for rule in &self.compiled_rules {
+            log::info!(
+                "  {} → {} (if_index={})",
+                rule.ip_label,
+                rule.nic,
+                rule.if_index
+            );
         }
         self.running.store(true, Ordering::SeqCst);
         GLOBAL_RUNNING.store(true, Ordering::SeqCst);
@@ -89,26 +105,19 @@ impl PacketRouter {
             let packet = &mut buf[..recv_len];
             let mut modified = false;
             if let Some(dst_ip) = Self::extract_dst_ipv4(packet) {
-                let dst_str = dst_ip.to_string();
-                if let Some((nic_name, rewrite_to)) = self.config.find_destination(&dst_str) {
-                    if let Some(&if_idx) = self.nic_index_map.get(&nic_name.to_ascii_lowercase()) {
-                        let mut net = addr.network();
-                        net.if_idx = if_idx;
-                        addr.set_network(net);
-                        modified = true;
-                        log::debug!("{} → NIC \"{}\" (if_idx={})", dst_str, nic_name, if_idx);
-                    } else {
-                        log::warn!(
-                            "rule matched {} → NIC \"{}\" but that interface was not found",
-                            dst_str,
-                            nic_name
-                        );
-                    }
-                    if let Some(new_ip_str) = rewrite_to {
-                        if let (Ok(new_ip), Some(ihl)) = (
-                            new_ip_str.parse::<Ipv4Addr>(),
-                            Self::ipv4_header_len(packet),
-                        ) {
+                if let Some(rule) = Config::find_compiled(&self.compiled_rules, dst_ip) {
+                    let mut net = addr.network();
+                    net.if_idx = rule.if_index;
+                    addr.set_network(net);
+                    modified = true;
+                    log::debug!(
+                        "{} → NIC \"{}\" (if_idx={})",
+                        dst_ip,
+                        rule.nic,
+                        rule.if_index
+                    );
+                    if let Some(new_ip) = rule.rewrite_to {
+                        if let Some(ihl) = Self::ipv4_header_len(packet) {
                             let o = ihl - 4;
                             let octets = new_ip.octets();
                             packet[o] = octets[0];
@@ -193,13 +202,12 @@ impl PacketRouter {
         Self::extract_dst_ipv4(packet).map(|ip| ip.to_string())
     }
     fn apply_routing_rule(&self, packet: &mut [u8]) -> Option<String> {
-        let dst_ip = Self::extract_dst_ip(packet)?;
-        let (nic, rewrite_to) = self.config.find_destination(&dst_ip)?;
-        if let Some(new_ip) = rewrite_to {
-            if let (Ok(ip), Some(ihl)) = (new_ip.parse::<Ipv4Addr>(), Self::ipv4_header_len(packet))
-            {
+        let dst_ip = Self::extract_dst_ipv4(packet)?;
+        let rule = Config::find_compiled(&self.compiled_rules, dst_ip)?;
+        if let Some(new_ip) = rule.rewrite_to {
+            if let Some(ihl) = Self::ipv4_header_len(packet) {
                 let o = ihl - 4;
-                let octets = ip.octets();
+                let octets = new_ip.octets();
                 packet[o] = octets[0];
                 packet[o + 1] = octets[1];
                 packet[o + 2] = octets[2];
@@ -207,7 +215,7 @@ impl PacketRouter {
                 Self::recalc_ipv4_header_checksum(packet, ihl);
             }
         }
-        Some(nic)
+        Some(rule.nic.clone())
     }
 }
 #[cfg(test)]
@@ -235,7 +243,10 @@ mod tests {
                 Some("10.0.0.1".to_string()),
             )
             .unwrap();
-        let router = PacketRouter::new(config);
+        let mut nic_map = HashMap::new();
+        nic_map.insert("ethernet".to_string(), 1);
+        let compiled = config.compile_rules(&nic_map).unwrap();
+        let router = PacketRouter::with_compiled_rules(config, compiled);
         let mut packet = vec![0u8; 20];
         packet[0] = 0x45;
         packet[16] = 192;
