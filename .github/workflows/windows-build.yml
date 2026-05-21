@@ -20,6 +20,16 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --bins
 
+      - name: Stage installer payload
+        shell: pwsh
+        run: ./installer/stage.ps1
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile setup wizard
+        run: iscc installer\roust.iss
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -28,3 +38,10 @@ jobs:
           path: |
             target/release/roust.exe
             target/release/roust-setup.exe
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: roust-installer-x86_64
+          if-no-files-found: error
+          path: installer/output/*.exe
