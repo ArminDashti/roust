@@ -1,32 +1,24 @@
 mod cli;
 mod config;
-mod network;
 mod core;
-
-use anyhow::{anyhow, Context, Result}; // Import shared error helpers used throughout the CLI binary
-use roust::update; // Import list download helpers from the library crate instead of declaring a local module
+mod network;
+use anyhow::{anyhow, Context, Result};
 use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
 use config::Config;
 use network::enumerate_interfaces;
+use roust::update;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-
 fn main() -> Result<()> {
-    // Initialize logger
     env_logger::Builder::from_default_env()
         .format_timestamp_secs()
         .init();
-
     bootstrap_runtime_files().context("prepare settings runtime file")?;
-
     let cli = parse_cli();
-
-    // Determine config path
     let config_path = cli.config.unwrap_or_else(Config::default_config_path);
-
     match cli.command {
         Commands::Nics { action } => handle_nics_command(action)?,
         Commands::Route { action } => handle_route_command(action)?,
@@ -38,23 +30,20 @@ fn main() -> Result<()> {
         Commands::Restart => handle_restart_command(&config_path)?,
         Commands::Status => handle_status_command()?,
         Commands::Update => {
-            let out_dir = env::current_dir().context("resolve current directory for roust update")?; // Use the process working directory as the output folder for list files
-            update::run(&out_dir)?; // Download Iran IP JSON via shared library code and rewrite the text list files there
-            println!( // Print a user-visible confirmation listing which files were refreshed
-                "Updated ipv4.txt, ipv6.txt, ipv4_cidr.txt, ipv6_cidr.txt in {}", // Message template naming the four list files and the folder path
-                out_dir.display() // Provide the display form of the output directory for the placeholder in the template
-            ); // Finish the println macro call after printing the update summary line
+            let out_dir =
+                env::current_dir().context("resolve current directory for roust update")?;
+            update::run(&out_dir)?;
+            println!(
+                "Updated ipv4.txt, ipv6.txt, ipv4_cidr.txt, ipv6_cidr.txt in {}",
+                out_dir.display()
+            );
         }
     }
-
     Ok(())
 }
-
-// Ensure settings.json exists in the current working directory before CLI commands run.
 fn bootstrap_runtime_files() -> Result<()> {
     let cwd = env::current_dir().context("resolve current directory for runtime bootstrap")?;
     let settings_path = cwd.join("settings.json");
-
     if !settings_path.exists() {
         let mut settings = OpenOptions::new()
             .write(true)
@@ -65,10 +54,8 @@ fn bootstrap_runtime_files() -> Result<()> {
             .write_all(b"{}\n")
             .with_context(|| format!("initialize {}", settings_path.display()))?;
     }
-
     Ok(())
 }
-
 fn handle_route_command(action: RouteCommands) -> Result<()> {
     match action {
         RouteCommands::Predict { dest } => {
@@ -79,28 +66,19 @@ fn handle_route_command(action: RouteCommands) -> Result<()> {
             println!("destination:  {}", p.dest);
             println!("if_index:     {}", p.if_index);
             println!("next_hop:     {}", p.next_hop);
-            match (&p.nic_name, &p.nic_display) {
-                (Some(name), Some(disp)) => {
-                    println!("nic (name):   {}", name);
-                    println!("nic (desc):   {}", disp);
-                }
-                (Some(name), None) => println!("nic (name):   {}", name),
-                _ => println!(
-                    "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",
-                    p.if_index
-                ),
-            }
+            match (&p.nic_name, &p.nic_display) {                (Some(name), Some(disp)) => {                    println!("nic (name):   {}", name);                    println!("nic (desc):   {}", disp);                }                (Some(name), None) => println!("nic (name):   {}", name),                _ => println!(                    "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",                    p.if_index                ),            }
         }
     }
     Ok(())
 }
-
 fn handle_nics_command(action: NicCommands) -> Result<()> {
     match action {
         NicCommands::List => {
-            println!("\n{:<20} {:<40} {:<20} {:<15} {:<20}", "Name", "Description", "MAC Address", "Type", "IPv4 Address");
+            println!(
+                "\n{:<20} {:<40} {:<20} {:<15} {:<20}",
+                "Name", "Description", "MAC Address", "Type", "IPv4 Address"
+            );
             println!("{}", "-".repeat(120));
-
             let interfaces = enumerate_interfaces()?;
             for nic in &interfaces {
                 let ipv4 = nic.ipv4_address.as_deref().unwrap_or("N/A");
@@ -113,12 +91,16 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
         }
     }
 }
-
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule { ip, nic, file, rewrite_to } = action {
+    if let RuleAction::Rule {
+        ip,
+        nic,
+        file,
+        rewrite_to,
+    } = action
+    {
         let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
         let interfaces = enumerate_interfaces()?;
-
         let validate_nic = |nic_name: &str| -> Result<()> {
             if interfaces
                 .iter()
@@ -129,11 +111,9 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
                 Err(anyhow!("Interface '{}' not found", nic_name))
             }
         };
-
         if let Some(file_path) = file {
             let content = fs::read_to_string(&file_path)?;
             let imported = Config::parse_import_file(&content, &file_path)?;
-
             for rule in imported {
                 let dest = if rule.nic.is_empty() {
                     nic.as_ref()
@@ -159,13 +139,11 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
                 "Provide --ip and --nic, or --file (e.g. routes.json with ip and nic per entry)"
             ));
         }
-
         config.save(config_path)?;
         println!("Rule(s) added successfully.");
     }
     Ok(())
 }
-
 fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     if let RuleAction::Rule { ip, .. } = action {
         if let Some(ip_addr) = ip {
@@ -180,9 +158,14 @@ fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     }
     Ok(())
 }
-
 fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule { ip, nic, rewrite_to, .. } = action {
+    if let RuleAction::Rule {
+        ip,
+        nic,
+        rewrite_to,
+        ..
+    } = action
+    {
         if let (Some(ip_addr), Some(new_nic)) = (ip, nic) {
             let mut config = Config::load(config_path)?;
             config.remove_rule(&ip_addr);
@@ -193,7 +176,6 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     }
     Ok(())
 }
-
 fn handle_start_command(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
     println!(
@@ -205,18 +187,17 @@ fn handle_start_command(config_path: &PathBuf) -> Result<()> {
         .context("enumerate network interfaces for routing")?;
     router.run()
 }
-
 fn handle_stop_command() -> Result<()> {
-    println!("[INFO] To stop the router, press Ctrl+C in the terminal where 'roust start' is running.");
+    println!(
+        "[INFO] To stop the router, press Ctrl+C in the terminal where 'roust start' is running."
+    );
     println!("[INFO] Windows Service support for remote stop is planned for a future release.");
     Ok(())
 }
-
 fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
     println!("[INFO] Restart: starting a fresh router session.");
     handle_start_command(config_path)
 }
-
 fn handle_status_command() -> Result<()> {
     println!("[INFO] The router runs as a foreground process via 'roust start'.");
     println!("[INFO] Windows Service support for status queries is planned for a future release.");

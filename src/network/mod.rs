@@ -1,8 +1,4 @@
-//! Network interface discovery and egress prediction (Windows routing table).
-
 use std::net::Ipv4Addr;
-
-/// Represents a network interface
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
     pub name: String,
@@ -12,27 +8,19 @@ pub struct NetworkInterface {
     pub ipv4_address: Option<String>,
     pub status: String,
 }
-
-/// Result of resolving which local interface Windows would use for an IPv4 destination.
 #[derive(Debug, Clone)]
 pub struct EgressPrediction {
     pub dest: Ipv4Addr,
-    /// Interface index from the best route (`MIB_IPFORWARDROW::dwForwardIfIndex`).
     pub if_index: u32,
-    /// Next hop from the routing table (may be `0.0.0.0` for on-link).
     pub next_hop: Ipv4Addr,
-    /// Adapter name when matched to `GetAdaptersInfo` (`Index`).
     pub nic_name: Option<String>,
     pub nic_display: Option<String>,
 }
-
 mod win;
 pub use win::{enumerate_interfaces, get_interface, interface_exists, predict_ipv4_egress};
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_enumerate_interfaces() {
         match enumerate_interfaces() {
