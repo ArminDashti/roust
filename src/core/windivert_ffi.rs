@@ -99,6 +99,7 @@ pub mod safe {
     }
     unsafe impl Send for WinDivertHandle {}
     unsafe impl Sync for WinDivertHandle {}
+
     impl WinDivertHandle {
         pub fn open(filter: &str, layer: i32, priority: i16, flags: u64) -> Result<Self, String> {
             let c_filter =
@@ -126,14 +127,17 @@ pub mod safe {
                     addr,
                 )
             };
+
             if ok == 0 {
                 let err = unsafe { GetLastError() };
                 return Err(format!("WinDivertRecv failed (GetLastError = {:?})", err));
             }
             Ok(recv_len)
         }
+
         pub fn send(&self, packet: &[u8], addr: &WinDivertAddress) -> Result<u32, String> {
             let mut send_len: u32 = 0;
+
             let ok = unsafe {
                 WinDivertSend(
                     self.handle,
@@ -143,6 +147,7 @@ pub mod safe {
                     addr,
                 )
             };
+            
             if ok == 0 {
                 let err = unsafe { GetLastError() };
                 return Err(format!("WinDivertSend failed (GetLastError = {:?})", err));
