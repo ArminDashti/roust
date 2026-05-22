@@ -45,7 +45,6 @@ pub struct Config {
     pub rules: Vec<RoutingRule>,
 }
 impl Config {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Config { rules: vec![] }
     }
@@ -117,31 +116,13 @@ impl Config {
         self.rules.push(rule);
         Ok(())
     }
+
     pub fn remove_rule(&mut self, ip: &str) -> bool {
         let initial_len = self.rules.len();
         self.rules.retain(|rule| rule.ip != ip);
         self.rules.len() < initial_len
     }
-    pub fn find_destination(&self, ip: &str) -> Option<(String, Option<String>)> {
-        for rule in &self.rules {
-            if self.ip_matches(&rule.ip, ip) {
-                return Some((rule.nic.clone(), rule.rewrite_to.clone()));
-            }
-        }
-        None
-    }
-    fn ip_matches(&self, pattern: &str, ip: &str) -> bool {
-        if pattern == "*" {
-            return true;
-        }
-        if let Ok(network) = pattern.parse::<IpNetwork>() {
-            if let Ok(addr) = ip.parse::<IpAddr>() {
-                return network.contains(addr);
-            }
-            return false;
-        }
-        pattern == ip
-    }
+
     fn validate_ip_format(&self, ip: &str) -> Result<()> {
         if ip.contains('/') {
             ip.parse::<IpNetwork>()?;
@@ -150,6 +131,7 @@ impl Config {
         ip.parse::<IpAddr>()?;
         Ok(())
     }
+    
     pub fn get_rules(&self) -> &[RoutingRule] {
         &self.rules
     }
@@ -213,10 +195,6 @@ impl Config {
         Ok(IpMatch::Exact(addr))
     }
 
-    #[allow(dead_code)]
-    pub fn clear_rules(&mut self) {
-        self.rules.clear();
-    }
     pub fn default_config_path() -> PathBuf {
         if let Ok(program_data) = std::env::var("ProgramData") {
             let path = PathBuf::from(program_data)
@@ -241,25 +219,6 @@ impl Default for Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_ip_matches_exact() {
-        let config = Config::new();
-        assert!(config.ip_matches("192.168.1.100", "192.168.1.100"));
-        assert!(!config.ip_matches("192.168.1.100", "192.168.1.101"));
-    }
-    #[test]
-    fn test_ip_matches_cidr() {
-        let config = Config::new();
-        assert!(config.ip_matches("192.168.1.0/24", "192.168.1.100"));
-        assert!(config.ip_matches("192.168.1.0/24", "192.168.1.1"));
-        assert!(!config.ip_matches("192.168.1.0/24", "192.168.2.1"));
-    }
-    #[test]
-    fn test_ip_matches_wildcard() {
-        let config = Config::new();
-        assert!(config.ip_matches("*", "192.168.1.100"));
-        assert!(config.ip_matches("*", "10.0.0.1"));
-    }
     #[test]
     fn test_load_routes_json_array_format() {
         let json = r#"[            {"ip": "10.0.0.0/8", "nic": "Ethernet"},            {"ip": "192.168.0.0/16", "nic": "Wi-Fi"}        ]"#;
@@ -308,29 +267,4 @@ mod tests {
         assert_eq!(hit.unwrap().if_index, 1);
     }
 
-    #[test]
-    fn test_find_destination() {
-        let mut config = Config::new();
-        config
-            .add_rule("192.168.1.0/24".to_string(), "Ethernet".to_string(), None)
-            .unwrap();
-        config
-            .add_rule("10.0.0.0/8".to_string(), "WiFi".to_string(), None)
-            .unwrap();
-        config
-            .add_rule("*".to_string(), "Ethernet".to_string(), None)
-            .unwrap();
-        assert_eq!(
-            config.find_destination("192.168.1.100"),
-            Some(("Ethernet".to_string(), None))
-        );
-        assert_eq!(
-            config.find_destination("10.5.5.5"),
-            Some(("WiFi".to_string(), None))
-        );
-        assert_eq!(
-            config.find_destination("172.16.0.1"),
-            Some(("Ethernet".to_string(), None))
-        );
-    }
 }

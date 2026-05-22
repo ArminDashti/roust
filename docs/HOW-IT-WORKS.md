@@ -66,7 +66,7 @@ Cargo is configured for **Windows MSVC only** (`build.rs` panics on non-Windows 
 
 | Module | Responsibility |
 |--------|----------------|
-| `cli/` | Clap command tree and global `--config` / `--verbose` |
+| `cli/` | Clap command tree and global `--config` |
 | `config/` | `routes.json` (or `%ProgramData%\roust\routes.json`) — rules as JSON array |
 | `network/` | `GetAdaptersInfo`, `GetBestRoute`, egress prediction |
 | `core/` | `PacketRouter` + WinDivert FFI and safe handle wrapper |
@@ -100,7 +100,7 @@ You can override with `--config <path>`.
 | `nic` | Adapter **name** or **description** from `GetAdaptersInfo` (case-insensitive) |
 | `rewrite_to` | Optional: replace destination IPv4 in the packet before reinject |
 
-**Matching order:** Rules are scanned in array order; the **first** matching rule wins (`config::Config::find_destination`).
+**Matching order:** Rules are scanned in array order; the **first** matching rule wins (`config::Config::find_compiled` on the in-memory compiled table at runtime).
 
 **Validation:** CIDR and single IPs are parsed with `ipnetwork` / `std::net::IpAddr`; `rewrite_to` must parse as an IP.
 
@@ -156,7 +156,7 @@ sequenceDiagram
     Stack->>WD: intercept (filter: outbound and ip)
     WD->>R: WinDivertRecv(packet, address)
     R->>R: parse IPv4 destination
-    R->>CFG: find_destination(dst)
+    R->>CFG: find_compiled(dst)
     alt rule matches
         CFG-->>R: nic + optional rewrite_to
         R->>R: set address.Network.IfIdx from NIC map
@@ -179,7 +179,7 @@ sequenceDiagram
 ### Rule application
 
 1. **Extract destination** — Parse IPv4 header; read destination address octets.  
-2. **Match** — `Config::find_destination` against rule `ip` (exact, CIDR, or `*`).  
+2. **Match** — `Config::find_compiled` against pre-parsed rule patterns (exact, CIDR, or `*`).  
 3. **Redirect interface** — Look up `nic` in a map built at start: adapter name and display name (lowercase) → `if_index` from `GetAdaptersInfo`. Set `WinDivertAddress` network union field `if_idx`.  
 4. **Optional rewrite** — If `rewrite_to` is set, overwrite destination IPv4 in the packet and recompute the IPv4 header checksum.  
 5. **Checksums** — `WinDivertHelperCalcChecksums` on modified packets.  
@@ -230,7 +230,7 @@ The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\rous
 
 - **Link time:** `build.rs` adds `WinDivert.lib` from `WinDivert-2.2.2-A/x64` (or x86).  
 - **Run time:** `WinDivert.dll` and driver must be beside `roust.exe` (setup or manual copy). Administrator rights are typically required for WinDivert.  
-- **Crates:** `clap`, `serde`/`serde_json`, `ipnetwork`, `windows` Win32 IP Helper APIs, `ureq` (HTTP), `zip` (setup), `windows-service` (reserved for future service mode).
+- **Crates:** `clap`, `serde`/`serde_json`, `ipnetwork`, `windows` Win32 IP Helper APIs, `ureq` (HTTP), `zip` (setup).
 
 ## Environment variables
 
@@ -273,7 +273,7 @@ roust update
 
 ## Planned / partial features
 
-- Windows Service for `stop` / `status` / `restart` without a foreground terminal (`windows-service` dependency is already in `Cargo.toml`).  
+- Windows Service for `stop` / `status` / `restart` without a foreground terminal.  
 - Deeper use of `settings.json` for state beyond routing rules.  
 - CLI help examples reference `roust ip dest …` style commands; the implemented surface uses `add` / `delete` / `edit` with `--ip` and `--nic` flags (see `src/cli/mod.rs`).
 

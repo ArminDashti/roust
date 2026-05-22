@@ -92,90 +92,89 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
     }
 }
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule {
+    let RuleAction::Rule {
         ip,
         nic,
         file,
         rewrite_to,
-    } = action
-    {
-        let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
-        let interfaces = enumerate_interfaces()?;
-        let validate_nic = |nic_name: &str| -> Result<()> {
-            if interfaces
-                .iter()
-                .any(|n| n.name.eq_ignore_ascii_case(nic_name))
-            {
-                Ok(())
-            } else {
-                Err(anyhow!("Interface '{}' not found", nic_name))
-            }
-        };
-        if let Some(file_path) = file {
-            let content = fs::read_to_string(&file_path)?;
-            let imported = Config::parse_import_file(&content, &file_path)?;
-            for rule in imported {
-                let dest = if rule.nic.is_empty() {
-                    nic.as_ref()
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "Each entry in {} needs a \"nic\", or pass --nic for IP-only lists",
-                                file_path.display()
-                            )
-                        })?
-                        .clone()
-                } else {
-                    rule.nic
-                };
-                validate_nic(&dest)?;
-                let rule_rewrite = rule.rewrite_to.or_else(|| rewrite_to.clone());
-                config.add_rule(rule.ip, dest, rule_rewrite)?;
-            }
-        } else if let (Some(ip_addr), Some(dest)) = (ip, nic) {
-            validate_nic(&dest)?;
-            config.add_rule(ip_addr, dest, rewrite_to)?;
+    } = action;
+    let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
+    let interfaces = enumerate_interfaces()?;
+    let validate_nic = |nic_name: &str| -> Result<()> {
+        if interfaces
+            .iter()
+            .any(|n| n.name.eq_ignore_ascii_case(nic_name))
+        {
+            Ok(())
         } else {
-            return Err(anyhow!(
-                "Provide --ip and --nic, or --file (e.g. routes.json with ip and nic per entry)"
-            ));
+            Err(anyhow!("Interface '{}' not found", nic_name))
         }
-        config.save(config_path)?;
-        println!("Rule(s) added successfully.");
-    }
-    Ok(())
-}
-fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule { ip, .. } = action {
-        if let Some(ip_addr) = ip {
-            let mut config = Config::load(config_path)?;
-            if config.remove_rule(&ip_addr) {
-                config.save(config_path)?;
-                println!("Rule deleted successfully.");
+    };
+
+    if let Some(file_path) = file {
+        let content = fs::read_to_string(&file_path)?;
+        let imported = Config::parse_import_file(&content, &file_path)?;
+        for rule in imported {
+            let dest = if rule.nic.is_empty() {
+                nic.as_ref()
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Each entry in {} needs a \"nic\", or pass --nic for IP-only lists",
+                            file_path.display()
+                        )
+                    })?
+                    .clone()
             } else {
-                println!("Rule not found.");
-            }
+                rule.nic
+            };
+            validate_nic(&dest)?;
+            let rule_rewrite = rule.rewrite_to.or_else(|| rewrite_to.clone());
+            config.add_rule(rule.ip, dest, rule_rewrite)?;
+        }
+    } else if let (Some(ip_addr), Some(dest)) = (ip, nic) {
+        validate_nic(&dest)?;
+        config.add_rule(ip_addr, dest, rewrite_to)?;
+    } else {
+        return Err(anyhow!(
+            "Provide --ip and --nic, or --file (e.g. routes.json with ip and nic per entry)"
+        ));
+    }
+    config.save(config_path)?;
+    println!("Rule(s) added successfully.");
+    Ok(())
+}
+
+fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
+    let RuleAction::Rule { ip, .. } = action;
+    if let Some(ip_addr) = ip {
+        let mut config = Config::load(config_path)?;
+        if config.remove_rule(&ip_addr) {
+            config.save(config_path)?;
+            println!("Rule deleted successfully.");
+        } else {
+            println!("Rule not found.");
         }
     }
     Ok(())
 }
+
 fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
-    if let RuleAction::Rule {
+    let RuleAction::Rule {
         ip,
         nic,
         rewrite_to,
         ..
-    } = action
-    {
-        if let (Some(ip_addr), Some(new_nic)) = (ip, nic) {
-            let mut config = Config::load(config_path)?;
-            config.remove_rule(&ip_addr);
-            config.add_rule(ip_addr, new_nic, rewrite_to)?;
-            config.save(config_path)?;
-            println!("Rule edited successfully.");
-        }
+    } = action;
+    if let (Some(ip_addr), Some(new_nic)) = (ip, nic) {
+        let mut config = Config::load(config_path)?;
+        config.remove_rule(&ip_addr);
+        config.add_rule(ip_addr, new_nic, rewrite_to)?;
+        config.save(config_path)?;
+        println!("Rule edited successfully.");
     }
     Ok(())
 }
+
 fn handle_start_command(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
     println!(
@@ -187,6 +186,7 @@ fn handle_start_command(config_path: &PathBuf) -> Result<()> {
         .context("enumerate network interfaces for routing")?;
     router.run()
 }
+
 fn handle_stop_command() -> Result<()> {
     println!(
         "[INFO] To stop the router, press Ctrl+C in the terminal where 'roust start' is running."
@@ -194,10 +194,12 @@ fn handle_stop_command() -> Result<()> {
     println!("[INFO] Windows Service support for remote stop is planned for a future release.");
     Ok(())
 }
+
 fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
     println!("[INFO] Restart: starting a fresh router session.");
     handle_start_command(config_path)
 }
+
 fn handle_status_command() -> Result<()> {
     println!("[INFO] The router runs as a foreground process via 'roust start'.");
     println!("[INFO] Windows Service support for status queries is planned for a future release.");
