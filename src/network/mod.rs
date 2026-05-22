@@ -16,8 +16,10 @@ pub struct EgressPrediction {
     pub nic_name: Option<String>,
     pub nic_display: Option<String>,
 }
+
 mod win;
-pub use win::{enumerate_interfaces, get_interface, interface_exists, predict_ipv4_egress};
+pub use win::{enumerate_interfaces, predict_ipv4_egress};
+
 #[cfg(test)]
 mod tests {
     use super::*;

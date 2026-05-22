@@ -5,12 +5,14 @@ pub const INVALID_HANDLE_VALUE: HANDLE = -1isize as *mut c_void;
 pub const WINDIVERT_LAYER_NETWORK: i32 = 0;
 pub const WINDIVERT_SHUTDOWN_RECV: i32 = 0x1;
 pub const WINDIVERT_MTU_MAX: usize = 40 + 0xFFFF;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct WinDivertDataNetwork {
     pub if_idx: u32,
     pub sub_if_idx: u32,
 }
+
 #[repr(C)]
 pub struct WinDivertAddress {
     pub timestamp: i64,
@@ -27,19 +29,7 @@ impl WinDivertAddress {
             union_data: [0u8; 64],
         }
     }
-    pub fn outbound(&self) -> bool {
-        (self.flags >> 17) & 1 != 0
-    }
-    pub fn set_outbound(&mut self, v: bool) {
-        if v {
-            self.flags |= 1 << 17;
-        } else {
-            self.flags &= !(1 << 17);
-        }
-    }
-    pub fn ipv6(&self) -> bool {
-        (self.flags >> 20) & 1 != 0
-    }
+
     pub fn network(&self) -> WinDivertDataNetwork {
         let mut net = WinDivertDataNetwork::default();
         unsafe {
@@ -51,6 +41,7 @@ impl WinDivertAddress {
         }
         net
     }
+
     pub fn set_network(&mut self, net: WinDivertDataNetwork) {
         unsafe {
             ptr::copy_nonoverlapping(
@@ -61,8 +52,10 @@ impl WinDivertAddress {
         }
     }
 }
+
 extern "C" {
     pub fn WinDivertOpen(filter: *const i8, layer: i32, priority: i16, flags: u64) -> HANDLE;
+
     pub fn WinDivertRecv(
         handle: HANDLE,
         p_packet: *mut c_void,
@@ -70,6 +63,7 @@ extern "C" {
         p_recv_len: *mut u32,
         p_addr: *mut WinDivertAddress,
     ) -> i32;
+
     pub fn WinDivertSend(
         handle: HANDLE,
         p_packet: *const c_void,
@@ -77,8 +71,11 @@ extern "C" {
         p_send_len: *mut u32,
         p_addr: *const WinDivertAddress,
     ) -> i32;
+
     pub fn WinDivertShutdown(handle: HANDLE, how: i32) -> i32;
+
     pub fn WinDivertClose(handle: HANDLE) -> i32;
+
     pub fn WinDivertHelperCalcChecksums(
         p_packet: *mut c_void,
         packet_len: u32,
@@ -86,12 +83,14 @@ extern "C" {
         flags: u64,
     ) -> i32;
 }
+
 extern "system" {
     pub fn SetConsoleCtrlHandler(
         handler_routine: Option<unsafe extern "system" fn(u32) -> i32>,
         add: i32,
     ) -> i32;
 }
+
 pub mod safe {
     use super::*;
     use windows::Win32::Foundation::GetLastError;
@@ -111,9 +110,11 @@ pub mod safe {
             }
             Ok(Self { handle })
         }
+
         pub fn raw(&self) -> HANDLE {
             self.handle
         }
+
         pub fn recv(&self, buf: &mut [u8], addr: &mut WinDivertAddress) -> Result<u32, String> {
             let mut recv_len: u32 = 0;
             let ok = unsafe {
@@ -148,18 +149,8 @@ pub mod safe {
             }
             Ok(send_len)
         }
-        pub fn shutdown(&self, how: i32) -> Result<(), String> {
-            let ok = unsafe { WinDivertShutdown(self.handle, how) };
-            if ok == 0 {
-                let err = unsafe { GetLastError() };
-                return Err(format!(
-                    "WinDivertShutdown failed (GetLastError = {:?})",
-                    err
-                ));
-            }
-            Ok(())
-        }
     }
+
     impl Drop for WinDivertHandle {
         fn drop(&mut self) {
             unsafe {
@@ -167,6 +158,7 @@ pub mod safe {
             }
         }
     }
+
     pub fn calc_checksums(packet: &mut [u8], addr: &mut WinDivertAddress) -> Result<(), String> {
         let ok = unsafe {
             WinDivertHelperCalcChecksums(
