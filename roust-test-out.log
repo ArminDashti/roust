@@ -1,0 +1,2 @@
+[INFO] Loaded 1 routing rules from C:\Users\armin\Documents\GitHub\roust\test-routes.json (compiling NIC → if_index in memory)
+[roust] Packet router running (inbound + outbound IPv4). Press Ctrl+C to stop.

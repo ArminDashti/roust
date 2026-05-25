@@ -103,7 +103,7 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     let validate_nic = |nic_name: &str| -> Result<()> {
         if interfaces
             .iter()
-            .any(|n| n.name.eq_ignore_ascii_case(nic_name))
+            .any(|n| network::nic_name_matches(n, nic_name))
         {
             Ok(())
         } else {

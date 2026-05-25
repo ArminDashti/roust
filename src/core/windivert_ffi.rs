@@ -20,6 +20,12 @@ pub struct WinDivertAddress {
     reserved2: u32,
     union_data: [u8; 64],
 }
+/// Bit index of `Outbound` in the `WINDIVERT_ADDRESS` flag word (after Layer + Event + Sniffed).
+const OUTBOUND_FLAG_BIT: u32 = 17;
+const IP_CHECKSUM_VALID_BIT: u32 = 21;
+const TCP_CHECKSUM_VALID_BIT: u32 = 22;
+const UDP_CHECKSUM_VALID_BIT: u32 = 23;
+
 impl WinDivertAddress {
     pub fn zeroed() -> Self {
         Self {
@@ -28,6 +34,11 @@ impl WinDivertAddress {
             reserved2: 0,
             union_data: [0u8; 64],
         }
+    }
+
+    /// True when the packet is on the outbound path (kernel → wire).
+    pub fn is_outbound(&self) -> bool {
+        (self.flags >> OUTBOUND_FLAG_BIT) & 1 != 0
     }
 
     pub fn network(&self) -> WinDivertDataNetwork {
@@ -50,6 +61,14 @@ impl WinDivertAddress {
                 std::mem::size_of::<WinDivertDataNetwork>(),
             );
         }
+    }
+
+    /// Clear valid-checksum flags so `WinDivertHelperCalcChecksums` recomputes after header edits.
+    pub fn invalidate_checksum_flags(&mut self) {
+        let mask = (1 << IP_CHECKSUM_VALID_BIT)
+            | (1 << TCP_CHECKSUM_VALID_BIT)
+            | (1 << UDP_CHECKSUM_VALID_BIT);
+        self.flags &= !mask;
     }
 }
 

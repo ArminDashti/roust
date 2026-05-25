@@ -3,6 +3,9 @@ use std::net::Ipv4Addr;
 pub struct NetworkInterface {
     pub name: String,
     pub display_name: String,
+    /// Windows interface alias (e.g. `Ethernet`, `Wi-Fi`) from `GetAdaptersAddresses`.
+    pub friendly_name: Option<String>,
+    pub default_gateway: Option<Ipv4Addr>,
     pub if_index: u32,
     pub mac_address: String,
     pub ipv4_address: Option<String>,
@@ -17,8 +20,10 @@ pub struct EgressPrediction {
     pub nic_display: Option<String>,
 }
 
+mod routes;
 mod win;
-pub use win::{enumerate_interfaces, predict_ipv4_egress};
+pub use routes::{install_routes_for_rules, remove_installed_routes, InstalledRoute};
+pub use win::{enumerate_interfaces, nic_name_matches, predict_ipv4_egress};
 
 #[cfg(test)]
 mod tests {

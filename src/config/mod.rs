@@ -21,11 +21,14 @@ pub struct CompiledRule {
     pub nic: String,
     pub match_pattern: IpMatch,
     pub if_index: u32,
+    /// Primary IPv4 on the target NIC; used to rewrite outbound source when redirecting egress.
+    pub egress_ipv4: Option<Ipv4Addr>,
     pub rewrite_to: Option<Ipv4Addr>,
 }
 
 impl CompiledRule {
-    /// Return true when this rule's pattern matches the destination IPv4 address.
+    /// Return true when this rule's pattern matches the given IPv4 address.
+    /// Outbound packets match on destination; inbound packets match on source (remote peer).
     pub fn matches(&self, dest: Ipv4Addr) -> bool {
         match &self.match_pattern {
             IpMatch::Wildcard => true,
@@ -140,6 +143,7 @@ impl Config {
     pub fn compile_rules(
         &self,
         nic_index_map: &HashMap<String, u32>,
+        nic_ipv4_by_index: &HashMap<u32, Ipv4Addr>,
     ) -> Result<Vec<CompiledRule>> {
         let mut compiled = Vec::with_capacity(self.rules.len());
         for rule in &self.rules {
@@ -163,11 +167,13 @@ impl Config {
                     })
                 })
                 .transpose()?;
+            let egress_ipv4 = nic_ipv4_by_index.get(&if_index).copied();
             compiled.push(CompiledRule {
                 ip_label: rule.ip.clone(),
                 nic: rule.nic.clone(),
                 match_pattern,
                 if_index,
+                egress_ipv4,
                 rewrite_to,
             });
         }
@@ -248,7 +254,7 @@ mod tests {
             .unwrap();
         let mut nic_map = HashMap::new();
         nic_map.insert("ethernet".to_string(), 42);
-        let compiled = config.compile_rules(&nic_map).unwrap();
+        let compiled = config.compile_rules(&nic_map, &HashMap::new()).unwrap();
         assert_eq!(compiled[0].if_index, 42);
         assert!(compiled[0].matches(Ipv4Addr::new(10, 1, 2, 3)));
     }
@@ -261,7 +267,7 @@ mod tests {
             .unwrap();
         let mut nic_map = HashMap::new();
         nic_map.insert("ethernet".to_string(), 1);
-        let compiled = config.compile_rules(&nic_map).unwrap();
+        let compiled = config.compile_rules(&nic_map, &HashMap::new()).unwrap();
         let hit = Config::find_compiled(&compiled, Ipv4Addr::new(192, 168, 1, 50));
         assert!(hit.is_some());
         assert_eq!(hit.unwrap().if_index, 1);

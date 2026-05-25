@@ -1,12 +1,12 @@
 # How roust works
 
-Technical overview of **roust** — a Windows-only CLI that routes outbound IPv4 traffic to specific network interfaces using rule-based configuration and [WinDivert](https://www.reqrypt.org/windivert.html) packet interception.
+Technical overview of **roust** — a Windows-only CLI that routes inbound and outbound IPv4 traffic to specific network interfaces using rule-based configuration and [WinDivert](https://www.reqrypt.org/windivert.html) packet interception.
 
 ## Purpose
 
 roust lets you send traffic destined for certain IP addresses (or CIDR ranges) out through a chosen NIC (Ethernet, Wi‑Fi, VPN adapter, etc.), optionally rewriting the packet’s destination IPv4 address before reinjection. Typical use cases include split routing (e.g. Iran or private IP blocks via one interface, everything else via another) without changing the Windows routing table for every prefix.
 
-The tool does **not** replace the full TCP/IP stack. It sits in user space, captures **outbound** IPv4 packets with WinDivert, adjusts metadata (and optionally headers), and reinjects them so the kernel sends them on the interface you configured.
+The tool does **not** replace the full TCP/IP stack. It sits in user space, captures **inbound and outbound** IPv4 packets with WinDivert, adjusts metadata (and optionally headers), and reinjects them so the kernel delivers or sends them on the interface you configured.
 
 ## High-level architecture
 
@@ -152,18 +152,19 @@ sequenceDiagram
     participant R as PacketRouter
     participant CFG as Config
 
-    App->>Stack: outbound IPv4 packet
-    Stack->>WD: intercept (filter: outbound and ip)
+    App->>Stack: IPv4 packet (inbound or outbound)
+    Stack->>WD: intercept (filter: ip)
     WD->>R: WinDivertRecv(packet, address)
-    R->>R: parse IPv4 destination
-    R->>CFG: find_compiled(dst)
+    R->>R: outbound? match dst : match src
+    R->>CFG: find_compiled(peer IP)
     alt rule matches
         CFG-->>R: nic + optional rewrite_to
         R->>R: set address.Network.IfIdx from NIC map
         opt rewrite_to set
-            R->>R: patch IPv4 dst, recalc header checksum
+            R->>R: outbound: patch dst; inbound: patch src
+            R->>R: recalc header checksum
         end
-        R->>R: WinDivertHelperCalcChecksums
+        R->>R: WinDivertHelperCalcChecksums (when header changed)
     end
     R->>WD: WinDivertSend(packet, address)
     WD->>Stack: reinject
@@ -172,22 +173,22 @@ sequenceDiagram
 
 ### WinDivert setup
 
-- **Filter:** `"outbound and ip"`  
+- **Filter:** `"ip"` (all IPv4/IPv6 at network layer; the router only processes IPv4 headers)  
 - **Layer:** `WINDIVERT_LAYER_NETWORK` (layer 0)  
 - **Buffer:** up to `WINDIVERT_MTU_MAX` bytes per packet  
 
 ### Rule application
 
-1. **Extract destination** — Parse IPv4 header; read destination address octets.  
+1. **Direction** — Read `WinDivertAddress.Outbound`: outbound packets use destination matching; inbound packets use source matching (the remote peer for traffic in both directions).  
 2. **Match** — `Config::find_compiled` against pre-parsed rule patterns (exact, CIDR, or `*`).  
-3. **Redirect interface** — Look up `nic` in a map built at start: adapter name and display name (lowercase) → `if_index` from `GetAdaptersInfo`. Set `WinDivertAddress` network union field `if_idx`.  
-4. **Optional rewrite** — If `rewrite_to` is set, overwrite destination IPv4 in the packet and recompute the IPv4 header checksum.  
-5. **Checksums** — `WinDivertHelperCalcChecksums` on modified packets.  
+3. **Redirect interface** — Look up `nic` in a map built at start: adapter name and display name (lowercase) → `if_index` from `GetAdaptersInfo`. Set `WinDivertAddress` network union field `if_idx` for reinject on the same path (inbound vs outbound).  
+4. **Optional rewrite** — If `rewrite_to` is set: outbound packets rewrite **destination**; inbound packets rewrite **source** (symmetric to split-tunnel semantics). Recompute the IPv4 header checksum.  
+5. **Checksums** — `WinDivertHelperCalcChecksums` when the IPv4 header was modified.  
 6. **Reinject** — **Every** packet is sent back (matched or not) so nothing is dropped.
 
 ### Shutdown
 
-A console Ctrl+C handler sets a global atomic flag and calls `WinDivertShutdown` on the open handle so `WinDivertRecv` unblocks. On exit, the router prints counts of routed vs passed-through packets.
+A console Ctrl+C handler sets a global atomic flag and calls `WinDivertShutdown` on the open handle so `WinDivertRecv` unblocks. On exit, the router prints separate routed vs passed-through counts for inbound and outbound.
 
 ## Network layer details
 
@@ -246,7 +247,7 @@ The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\rous
 ## Security and operational notes
 
 - **Privileges:** WinDivert installation and capture usually require elevation.  
-- **Scope:** Only **outbound IPv4** at the network layer is handled in the main loop; IPv6 and inbound traffic are not rerouted by the current filter.  
+- **Scope:** **Inbound and outbound IPv4** at the network layer; IPv6 packets are not matched or rewritten (they pass through unchanged).  
 - **Rule vs route table:** `route predict` shows Windows’ choice; `start` overrides egress for matched destinations via WinDivert `if_idx`, which can differ from `GetBestRoute` for those IPs.  
 - **No background service yet:** One foreground process; stopping is Ctrl+C in that terminal.  
 - **Traffic integrity:** Modified packets get checksum recalculation; unmodified packets pass through unchanged.

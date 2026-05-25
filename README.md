@@ -1,6 +1,6 @@
 # roust
 
-Windows packet router with rule-based NIC routing (WinDivert). Release binaries are `roust.exe` (CLI) and `roust-setup.exe` (first-run setup).
+Windows packet router with rule-based NIC routing for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (CLI) and `roust-setup.exe` (first-run setup).
 
 **Technical overview:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — architecture, packet flow, config, CLI, and setup.
 
