@@ -1,0 +1,6 @@
+# roust key points
+
+- `ipnumberia.com` resolves to **212.80.19.12** (server IP). The page shows your WAN IP (e.g. **185.197.68.167** on Ethernet), not 212.80.19.12.
+- WinDivert needs `WinDivert.dll` and `WinDivert64.sys` next to `roust.exe`.
+- WinDivert **ignores outbound `IfIdx`** on send; NIC routing is done via **Windows host routes** installed at `roust start` (`route add … IF <index>`), removed on stop.
+- Adapter alias **Ethernet** maps via `GetAdaptersAddresses` `FriendlyName` + `GAA_FLAG_INCLUDE_GATEWAYS`.
