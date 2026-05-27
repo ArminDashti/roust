@@ -2,8 +2,10 @@ mod cli;
 mod config;
 mod core;
 mod network;
+mod service;
+
 use anyhow::{anyhow, Context, Result};
-use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction};
+use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction, ServiceCommands};
 use config::Config;
 use network::enumerate_interfaces;
 use roust::update;
@@ -12,7 +14,12 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
+
 fn main() -> Result<()> {
+    if service::invoked_as_service() {
+        return service::run_dispatcher();
+    }
+
     env_logger::Builder::from_default_env()
         .format_timestamp_secs()
         .init();
@@ -25,10 +32,11 @@ fn main() -> Result<()> {
         Commands::Add { action } => handle_add_rule(action, &config_path)?,
         Commands::Delete { action } => handle_delete_rule(action, &config_path)?,
         Commands::Edit { action } => handle_edit_rule(action, &config_path)?,
-        Commands::Start => handle_start_command(&config_path)?,
+        Commands::Start => handle_start_command()?,
         Commands::Stop => handle_stop_command()?,
-        Commands::Restart => handle_restart_command(&config_path)?,
+        Commands::Restart => handle_restart_command()?,
         Commands::Status => handle_status_command()?,
+        Commands::Service { action } => handle_service_command(action)?,
         Commands::Update => {
             let out_dir =
                 env::current_dir().context("resolve current directory for roust update")?;
@@ -41,6 +49,7 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
+
 fn bootstrap_runtime_files() -> Result<()> {
     let cwd = env::current_dir().context("resolve current directory for runtime bootstrap")?;
     let settings_path = cwd.join("settings.json");
@@ -56,6 +65,7 @@ fn bootstrap_runtime_files() -> Result<()> {
     }
     Ok(())
 }
+
 fn handle_route_command(action: RouteCommands) -> Result<()> {
     match action {
         RouteCommands::Predict { dest } => {
@@ -66,11 +76,22 @@ fn handle_route_command(action: RouteCommands) -> Result<()> {
             println!("destination:  {}", p.dest);
             println!("if_index:     {}", p.if_index);
             println!("next_hop:     {}", p.next_hop);
-            match (&p.nic_name, &p.nic_display) {                (Some(name), Some(disp)) => {                    println!("nic (name):   {}", name);                    println!("nic (desc):   {}", disp);                }                (Some(name), None) => println!("nic (name):   {}", name),                _ => println!(                    "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",                    p.if_index                ),            }
+            match (&p.nic_name, &p.nic_display) {
+                (Some(name), Some(disp)) => {
+                    println!("nic (name):   {}", name);
+                    println!("nic (desc):   {}", disp);
+                }
+                (Some(name), None) => println!("nic (name):   {}", name),
+                _ => println!(
+                    "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",
+                    p.if_index
+                ),
+            }
         }
     }
     Ok(())
 }
+
 fn handle_nics_command(action: NicCommands) -> Result<()> {
     match action {
         NicCommands::List => {
@@ -91,6 +112,7 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
         }
     }
 }
+
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     let RuleAction::Rule {
         ip,
@@ -175,33 +197,31 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn handle_start_command(config_path: &PathBuf) -> Result<()> {
-    let config = Config::load(config_path)?;
-    println!(
-        "[INFO] Loaded {} routing rules from {} (compiling NIC → if_index in memory)",
-        config.rules.len(),
-        config_path.display()
-    );
-    let router = self::core::PacketRouter::with_interfaces(config)
-        .context("enumerate network interfaces for routing")?;
-    router.run()
+fn handle_start_command() -> Result<()> {
+    if !service::is_installed()? {
+        return Err(anyhow!(
+            "The packet router runs as a Windows service. Install it first (elevated PowerShell):\n  \
+             roust service install\nThen start it:\n  roust start"
+        ));
+    }
+    service::start()
 }
 
 fn handle_stop_command() -> Result<()> {
-    println!(
-        "[INFO] To stop the router, press Ctrl+C in the terminal where 'roust start' is running."
-    );
-    println!("[INFO] Windows Service support for remote stop is planned for a future release.");
-    Ok(())
+    service::stop()
 }
 
-fn handle_restart_command(config_path: &PathBuf) -> Result<()> {
-    println!("[INFO] Restart: starting a fresh router session.");
-    handle_start_command(config_path)
+fn handle_restart_command() -> Result<()> {
+    service::restart()
 }
 
 fn handle_status_command() -> Result<()> {
-    println!("[INFO] The router runs as a foreground process via 'roust start'.");
-    println!("[INFO] Windows Service support for status queries is planned for a future release.");
-    Ok(())
+    service::print_status()
+}
+
+fn handle_service_command(action: ServiceCommands) -> Result<()> {
+    match action {
+        ServiceCommands::Install { auto } => service::install(auto),
+        ServiceCommands::Uninstall => service::uninstall(),
+    }
 }
