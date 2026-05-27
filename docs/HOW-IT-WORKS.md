@@ -127,12 +127,14 @@ On `add`, the NIC name is validated against live interfaces.
 
 ### Router lifecycle
 
-| Command | Behavior today |
-|---------|----------------|
-| `roust start` | Loads config, builds `PacketRouter::with_interfaces`, blocks in WinDivert loop until **Ctrl+C** |
-| `roust stop` | Informational only; stop the foreground `start` process |
-| `roust restart` | Runs `start` again (no detached daemon) |
-| `roust status` | Informational; Windows Service integration is planned |
+| Command | Behavior |
+|---------|----------|
+| `roust service install` | Register the **Roust** Windows service (elevated; optional `--auto` for boot start) |
+| `roust service uninstall` | Remove the service registration |
+| `roust start` | Start the Windows service (SCM runs `roust.exe --run-as-service`) |
+| `roust stop` | Stop the Windows service |
+| `roust restart` | Stop then start the service |
+| `roust status` | Print SCM state and config path |
 
 ### IP list updates
 
@@ -249,7 +251,7 @@ The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\rous
 - **Privileges:** WinDivert installation and capture usually require elevation.  
 - **Scope:** **Inbound and outbound IPv4** at the network layer; IPv6 packets are not matched or rewritten (they pass through unchanged).  
 - **Rule vs route table:** `route predict` shows Windows’ choice; `start` overrides egress for matched destinations via WinDivert `if_idx`, which can differ from `GetBestRoute` for those IPs.  
-- **No background service yet:** One foreground process; stopping is Ctrl+C in that terminal.  
+- **Windows service:** The router runs under SCM as service **Roust**; logs go to `logs/roust-service.log` in the install directory. Install with `roust service install` (admin).  
 - **Traffic integrity:** Modified packets get checksum recalculation; unmodified packets pass through unchanged.
 
 ## Example end-to-end workflow
@@ -274,7 +276,7 @@ roust update
 
 ## Planned / partial features
 
-- Windows Service for `stop` / `status` / `restart` without a foreground terminal.  
+- Service recovery actions (restart on failure) and richer `status` output.  
 - Deeper use of `settings.json` for state beyond routing rules.  
 - CLI help examples reference `roust ip dest …` style commands; the implemented surface uses `add` / `delete` / `edit` with `--ip` and `--nic` flags (see `src/cli/mod.rs`).
 

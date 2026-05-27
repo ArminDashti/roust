@@ -17,7 +17,18 @@ roust --help
 roust nics list
 ```
 
-The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Iran/private IP lists, and adds that folder to your **user** PATH.
+The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Iran/private IP lists, adds that folder to your **user** PATH, and registers a **Windows service** so the router runs in the background.
+
+After install (elevated PowerShell):
+
+```powershell
+roust service install   # once, if not done by the installer
+roust start             # start the Windows service
+roust status            # check service state
+roust stop              # stop the service
+```
+
+Service logs: `logs\roust-service.log` in the install directory.
 
 ### Manual / developer setup
 

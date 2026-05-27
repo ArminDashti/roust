@@ -44,6 +44,9 @@ env_logger = "0.11"
 # Error handling
 anyhow = "1.0"
 
+# Windows Service Control Manager integration
+windows-service = "0.7"
+
 # HTTP (blocking) for `roust update`
 ureq = "2.12"
 

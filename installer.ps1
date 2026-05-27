@@ -10,6 +10,7 @@
   4. Moves roust.exe into the install folder.
   5. Ensures the install folder is on the user PATH (for PowerShell/cmd).
   6. Ensures routes.json exists in the install folder.
+  7. Copies WinDivert runtime files (WinDivert.dll, WinDivert64.sys) beside roust.exe.
 #>
 param(
     [string]$InstallDir = 'C:\Program Files\Roust',
@@ -120,6 +121,21 @@ function Add-InstallDirToUserPath {
     $env:Path = "$env:Path;$installFull"
 }
 
+function Install-WinDivertRuntime {
+    # roust.exe loads WinDivert.dll from its own directory at runtime.
+    $windivertDir = Join-Path $RepoRoot 'WinDivert-2.2.2-A\x64'
+    $required = @('WinDivert.dll', 'WinDivert64.sys')
+    foreach ($name in $required) {
+        $source = Join-Path $windivertDir $name
+        if (-not (Test-Path -LiteralPath $source)) {
+            throw "WinDivert runtime missing at $source — ensure WinDivert-2.2.2-A/x64 is present in the repo."
+        }
+        $dest = Join-Path $InstallDir $name
+        Write-Step "Copying $name -> $dest"
+        Copy-Item -LiteralPath $source -Destination $dest -Force
+    }
+}
+
 function Ensure-RoutesJson {
     # Copy default routes from the repo when the install folder has no routes.json yet.
     if (-not (Test-Path -LiteralPath $InstallRoutes)) {
@@ -163,10 +179,26 @@ Build-RoustRelease
 Install-RoustExe
 Add-InstallDirToUserPath
 Ensure-RoutesJson
+Install-WinDivertRuntime
 Test-RoustOnPath
+
+Write-Host ''
+Write-Step 'Registering Windows service (requires elevation)...'
+& $InstallExe service install 2>&1 | ForEach-Object { Write-Host $_ }
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning 'Service install failed. Run manually as Administrator: roust service install'
+} else {
+    Write-Step 'Starting Windows service...'
+    & $InstallExe start 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'Service start failed. After fixing config, run: roust start'
+    }
+}
 
 Write-Host ''
 Write-Host 'Install finished.'
 Write-Host "  Binary:  $InstallExe"
 Write-Host "  Routes:  $InstallRoutes"
+Write-Host '  Service: roust status   (Windows service name: Roust)'
+Write-Host '  Logs:    logs\roust-service.log under the install folder'
 Write-Host '  Open a new PowerShell window if `roust` is not found yet.'

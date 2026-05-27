@@ -14,12 +14,19 @@ use windivert_ffi::{
 static GLOBAL_RUNNING: AtomicBool = AtomicBool::new(false);
 static GLOBAL_HANDLE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
+/// Signal the router loop to exit (Ctrl+C handler and Windows Service STOP).
+pub fn request_shutdown() {
     GLOBAL_RUNNING.store(false, Ordering::SeqCst);
     let handle = GLOBAL_HANDLE.load(Ordering::SeqCst);
     if !handle.is_null() {
-        windivert_ffi::WinDivertShutdown(handle, WINDIVERT_SHUTDOWN_RECV);
+        unsafe {
+            windivert_ffi::WinDivertShutdown(handle, WINDIVERT_SHUTDOWN_RECV);
+        }
     }
+}
+
+unsafe extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> i32 {
+    request_shutdown();
     1
 }
 
