@@ -6,7 +6,11 @@ use windows::Win32::NetworkManagement::IpHelper::*;
 use windows::Win32::Networking::WinSock::{AF_INET, AF_UNSPEC, SOCKADDR_IN};
 
 pub fn nic_name_matches(nic: &NetworkInterface, nic_name: &str) -> bool {
-    [Some(nic.name.as_str()), Some(nic.display_name.as_str()), nic.friendly_name.as_deref()]
+    [
+        Some(nic.name.as_str()),
+        Some(nic.display_name.as_str()),
+        nic.friendly_name.as_deref(),
+    ]
         .into_iter()
         .flatten()
         .any(|label| label.eq_ignore_ascii_case(nic_name))
@@ -161,6 +165,7 @@ pub fn predict_ipv4_egress(dest: Ipv4Addr) -> Result<EgressPrediction> {
     let nic = interfaces.iter().find(|n| n.if_index == if_index).cloned();
     let nic_name = nic.as_ref().map(|n| n.name.clone());
     let nic_display = nic.as_ref().map(|n| n.display_name.clone());
+    let nic_friendly = nic.as_ref().map(|n| n.friendly_name.clone());
 
     Ok(EgressPrediction {
         dest,
@@ -168,5 +173,6 @@ pub fn predict_ipv4_egress(dest: Ipv4Addr) -> Result<EgressPrediction> {
         next_hop,
         nic_name,
         nic_display,
+        nic_friendly,
     })
 }
