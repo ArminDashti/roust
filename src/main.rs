@@ -96,16 +96,17 @@ fn handle_nics_command(action: NicCommands) -> Result<()> {
     match action {
         NicCommands::List => {
             println!(
-                "\n{:<20} {:<40} {:<20} {:<15} {:<20}",
-                "Name", "Description", "MAC Address", "Type", "IPv4 Address"
+                "\n{:<18} {:<36} {:<20} {:<12} {:<16}",
+                "Friendly", "Description", "MAC Address", "Type", "IPv4 Address"
             );
-            println!("{}", "-".repeat(120));
+            println!("{}", "-".repeat(110));
             let interfaces = enumerate_interfaces()?;
             for nic in &interfaces {
                 let ipv4 = nic.ipv4_address.as_deref().unwrap_or("N/A");
+                let friendly = nic.friendly_name.as_deref().unwrap_or("-");
                 println!(
-                    "{:<20} {:<40} {:<20} {:<15} {:<20}",
-                    nic.name, nic.display_name, nic.mac_address, nic.status, ipv4
+                    "{:<18} {:<36} {:<20} {:<12} {:<16}",
+                    friendly, nic.display_name, nic.mac_address, nic.status, ipv4
                 );
             }
             Ok(())
@@ -129,7 +130,19 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
         {
             Ok(())
         } else {
-            Err(anyhow!("Interface '{}' not found", nic_name))
+            let known: Vec<String> = interfaces
+                .iter()
+                .map(|n| {
+                    n.friendly_name
+                        .as_ref()
+                        .map_or_else(|| n.display_name.clone(), |f| format!("{f} ({})", n.display_name))
+                })
+                .collect();
+            Err(anyhow!(
+                "Interface '{}' not found. Known adapters: {}",
+                nic_name,
+                known.join("; ")
+            ))
         }
     };
 

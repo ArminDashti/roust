@@ -1,14 +1,22 @@
 [
   {
     "ip": "10.0.0.0/8",
-    "nic": "Ethernet"
+    "nic": "Ethernet",
+    "rewrite_to": null
   },
   {
     "ip": "172.16.0.0/12",
-    "nic": "Ethernet"
+    "nic": "Ethernet",
+    "rewrite_to": null
   },
   {
     "ip": "192.168.0.0/16",
-    "nic": "Ethernet"
+    "nic": "Ethernet",
+    "rewrite_to": null
+  },
+  {
+    "ip": "212.80.19.12",
+    "nic": "Ethernet 2",
+    "rewrite_to": null
   }
 ]
