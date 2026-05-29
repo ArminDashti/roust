@@ -1,11 +1,16 @@
 mod windivert_ffi;
 use crate::config::{CompiledRule, Config};
-use crate::network::{enumerate_interfaces, install_routes_for_rules, remove_installed_routes, InstalledRoute};
+use crate::network::{
+    build_compiled_rules, install_routes_for_rules, remove_installed_routes, InstalledRoute,
+};
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
+use std::fs;
 use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
+use std::time::{Duration, SystemTime};
 use windivert_ffi::{
     safe::{self, WinDivertHandle},
     WinDivertAddress, WINDIVERT_LAYER_NETWORK, WINDIVERT_MTU_MAX, WINDIVERT_SHUTDOWN_RECV,
@@ -38,50 +43,88 @@ struct RouteStats {
     inbound_passed: u64,
 }
 
+const CONFIG_RELOAD_POLL: Duration = Duration::from_millis(500);
+const CONFIG_RELOAD_DEBOUNCE: Duration = Duration::from_millis(300);
+
 pub struct PacketRouter {
-    config: Arc<Config>,
+    config_path: PathBuf,
+    config: Arc<RwLock<Config>>,
     running: Arc<AtomicBool>,
-    compiled_rules: Vec<CompiledRule>,
-    installed_routes: Vec<InstalledRoute>,
+    compiled_rules: Arc<RwLock<Vec<CompiledRule>>>,
+    installed_routes: Arc<Mutex<Vec<InstalledRoute>>>,
 }
 
 impl PacketRouter {
-    pub fn with_interfaces(config: Config) -> Result<Self> {
-        let interfaces = enumerate_interfaces()?;
-        let mut nic_index_map = HashMap::new();
-
-        let mut nic_ipv4_by_index = HashMap::new();
-        let mut nic_gateway_by_index = HashMap::new();
-
-        for nic in &interfaces {
-            nic_index_map.insert(nic.name.to_ascii_lowercase(), nic.if_index);
-            nic_index_map.insert(nic.display_name.to_ascii_lowercase(), nic.if_index);
-            if let Some(alias) = &nic.friendly_name {
-                nic_index_map.insert(alias.to_ascii_lowercase(), nic.if_index);
-            }
-            if let Some(ip) = &nic.ipv4_address {
-                if let Ok(addr) = ip.parse::<Ipv4Addr>() {
-                    if !addr.is_unspecified() && !addr.is_loopback() {
-                        nic_ipv4_by_index.insert(nic.if_index, addr);
-                    }
-                }
-            }
-            if let Some(gw) = nic.default_gateway {
-                if !gw.is_unspecified() {
-                    nic_gateway_by_index.insert(nic.if_index, gw);
-                }
-            }
-        }
-
-        let compiled_rules = config.compile_rules(&nic_index_map, &nic_ipv4_by_index)?;
-        let installed_routes = install_routes_for_rules(&compiled_rules, &nic_gateway_by_index)?;
+    pub fn with_interfaces(config: Config, config_path: PathBuf) -> Result<Self> {
+        let compiled_rules = build_compiled_rules(&config)?;
+        let installed_routes = install_routes_for_rules(&compiled_rules)?;
 
         Ok(PacketRouter {
-            config: Arc::new(config),
+            config_path,
+            config: Arc::new(RwLock::new(config)),
             running: Arc::new(AtomicBool::new(false)),
-            compiled_rules,
-            installed_routes,
+            compiled_rules: Arc::new(RwLock::new(compiled_rules)),
+            installed_routes: Arc::new(Mutex::new(installed_routes)),
         })
+    }
+
+    fn config_modified_time(path: &Path) -> Option<SystemTime> {
+        fs::metadata(path).ok()?.modified().ok()
+    }
+
+    fn spawn_config_watcher(&self) {
+        let config_path = self.config_path.clone();
+        let compiled_rules = Arc::clone(&self.compiled_rules);
+        let installed_routes = Arc::clone(&self.installed_routes);
+        let config = Arc::clone(&self.config);
+        let running = Arc::clone(&self.running);
+        let baseline_mtime = Self::config_modified_time(&config_path);
+
+        thread::Builder::new()
+            .name("roust-config-watcher".into())
+            .spawn(move || {
+                let mut last_seen = baseline_mtime;
+                while GLOBAL_RUNNING.load(Ordering::SeqCst) {
+                    thread::sleep(CONFIG_RELOAD_POLL);
+                    if !GLOBAL_RUNNING.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    let Some(mtime) = Self::config_modified_time(&config_path) else {
+                        continue;
+                    };
+                    if Some(mtime) == last_seen {
+                        continue;
+                    }
+
+                    thread::sleep(CONFIG_RELOAD_DEBOUNCE);
+                    let Some(stable_mtime) = Self::config_modified_time(&config_path) else {
+                        continue;
+                    };
+                    if Some(stable_mtime) != Some(mtime) {
+                        last_seen = Some(stable_mtime);
+                        continue;
+                    }
+                    last_seen = Some(stable_mtime);
+
+                    match reload_config_from_disk(
+                        &config_path,
+                        &config,
+                        &compiled_rules,
+                        &installed_routes,
+                    ) {
+                        Ok(()) => log::info!(
+                            "Config reloaded from {}",
+                            config_path.display()
+                        ),
+                        Err(err) => log::error!(
+                            "Config reload failed (keeping previous rules): {err:#}"
+                        ),
+                    }
+                }
+                let _ = running;
+            })
+            .ok();
     }
 
     pub fn run(&self) -> Result<()> {
@@ -95,22 +138,22 @@ impl PacketRouter {
         log::info!(
             "WinDivert handle opened (filter=\"{}\"), {} routing rules loaded",
             filter,
-            self.config.get_rules().len()
+            self.config.read().unwrap().get_rules().len()
         );
 
-        for rule in &self.compiled_rules {
+        for rule in self.compiled_rules.read().unwrap().iter() {
             match rule.egress_ipv4 {
                 Some(egress) => log::info!(
-                    "  {} → {} (if_index={}, egress_src={})",
+                    "  {} → gateway {} (if_index={}, egress_src={})",
                     rule.ip_label,
-                    rule.nic,
+                    rule.gateway,
                     rule.if_index,
                     egress
                 ),
                 None => log::info!(
-                    "  {} → {} (if_index={})",
+                    "  {} → gateway {} (if_index={})",
                     rule.ip_label,
-                    rule.nic,
+                    rule.gateway,
                     rule.if_index
                 ),
             }
@@ -119,6 +162,7 @@ impl PacketRouter {
         self.running.store(true, Ordering::SeqCst);
         GLOBAL_RUNNING.store(true, Ordering::SeqCst);
         GLOBAL_HANDLE.store(handle.raw(), Ordering::SeqCst);
+        self.spawn_config_watcher();
 
         unsafe {
             windivert_ffi::SetConsoleCtrlHandler(Some(console_ctrl_handler), 1);
@@ -148,7 +192,9 @@ impl PacketRouter {
 
             let packet = &mut buf[..recv_len];
             let outbound = addr.is_outbound();
-            let routed = Self::apply_rules(packet, &mut addr, &self.compiled_rules, outbound);
+            let rules = self.compiled_rules.read().unwrap();
+            let routed = Self::apply_rules(packet, &mut addr, &rules, outbound);
+            drop(rules);
             if routed {
                 if outbound {
                     stats.outbound_routed += 1;
@@ -169,7 +215,9 @@ impl PacketRouter {
         GLOBAL_HANDLE.store(std::ptr::null_mut(), Ordering::SeqCst);
         GLOBAL_RUNNING.store(false, Ordering::SeqCst);
         self.running.store(false, Ordering::SeqCst);
-        remove_installed_routes(&self.installed_routes);
+        if let Ok(installed) = self.installed_routes.lock() {
+            remove_installed_routes(&installed);
+        }
         println!(
             "[roust] Stopped. outbound: {} routed, {} passed; inbound: {} routed, {} passed.",
             stats.outbound_routed,
@@ -200,7 +248,7 @@ impl PacketRouter {
             return false;
         };
 
-        // NIC selection is handled via kernel routes installed at startup.
+        // Egress selection is handled via kernel routes installed at startup.
         // WinDivert ignores outbound IfIdx; only apply packet edits for rewrite_to.
         let Some(new_ip) = rule.rewrite_to else {
             return false;
@@ -208,9 +256,9 @@ impl PacketRouter {
 
         let direction = if outbound { "outbound" } else { "inbound" };
         log::debug!(
-            "{direction} {} rewrite on NIC \"{}\" (if_idx={})",
+            "{direction} {} rewrite via gateway {} (if_idx={})",
             match_ip,
-            rule.nic,
+            rule.gateway,
             rule.if_index
         );
 
@@ -288,6 +336,55 @@ impl PacketRouter {
     }
 }
 
+fn reload_config_from_disk(
+    config_path: &Path,
+    config: &Arc<RwLock<Config>>,
+    compiled_rules: &Arc<RwLock<Vec<CompiledRule>>>,
+    installed_routes: &Arc<Mutex<Vec<InstalledRoute>>>,
+) -> Result<()> {
+    let new_config = Config::load(config_path)?;
+    let new_compiled = build_compiled_rules(&new_config)?;
+
+    let mut installed = installed_routes
+        .lock()
+        .map_err(|_| anyhow!("installed routes lock poisoned"))?;
+    remove_installed_routes(&installed);
+    *installed = install_routes_for_rules(&new_compiled)?;
+    drop(installed);
+
+    *compiled_rules
+        .write()
+        .map_err(|_| anyhow!("compiled rules lock poisoned"))? = new_compiled;
+    *config
+        .write()
+        .map_err(|_| anyhow!("config lock poisoned"))? = new_config;
+
+    let rules = compiled_rules.read().unwrap();
+    log::info!(
+        "Reloaded {} routing rules from {}",
+        rules.len(),
+        config_path.display()
+    );
+    for rule in rules.iter() {
+        match rule.egress_ipv4 {
+            Some(egress) => log::info!(
+                "  {} → gateway {} (if_index={}, egress_src={})",
+                rule.ip_label,
+                rule.gateway,
+                rule.if_index,
+                egress
+            ),
+            None => log::info!(
+                "  {} → gateway {} (if_index={})",
+                rule.ip_label,
+                rule.gateway,
+                rule.if_index
+            ),
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,7 +416,7 @@ mod tests {
         let mut addr = WinDivertAddress::zeroed();
         let rules = vec![CompiledRule {
             ip_label: "212.80.19.12".to_string(),
-            nic: "Ethernet".to_string(),
+            gateway: Ipv4Addr::new(192, 168, 1, 1),
             match_pattern: crate::config::IpMatch::Exact(Ipv4Addr::new(212, 80, 19, 12)),
             if_index: 21,
             egress_ipv4: Some(Ipv4Addr::new(192, 168, 1, 101)),

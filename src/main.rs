@@ -5,10 +5,11 @@ mod network;
 mod service;
 
 use anyhow::{anyhow, Context, Result};
-use cli::{parse_cli, Commands, NicCommands, RouteCommands, RuleAction, ServiceCommands};
+use cli::{parse_cli, Commands, RuleAction, RuleCommands};
 use config::Config;
-use network::enumerate_interfaces;
-use roust::update;
+use network::{
+    build_routing_gateway_index_map, enumerate_interfaces, gateway_exists_on_host,
+};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -25,10 +26,22 @@ fn main() -> Result<()> {
         .init();
     bootstrap_runtime_files().context("prepare settings runtime file")?;
     let cli = parse_cli();
+
+    if cli.install_service {
+        return service::install(false);
+    }
+    if cli.uninstall_service {
+        return service::uninstall();
+    }
+
     let config_path = cli.config.unwrap_or_else(Config::default_config_path);
-    match cli.command {
-        Commands::Nics { action } => handle_nics_command(action)?,
-        Commands::Route { action } => handle_route_command(action)?,
+    let command = cli
+        .command
+        .ok_or_else(|| anyhow!("missing subcommand (run roust --help)"))?;
+
+    match command {
+        Commands::Predict { ip } => handle_predict_command(&ip)?,
+        Commands::Rule { action } => handle_rule_command(action, &config_path)?,
         Commands::Add { action } => handle_add_rule(action, &config_path)?,
         Commands::Delete { action } => handle_delete_rule(action, &config_path)?,
         Commands::Edit { action } => handle_edit_rule(action, &config_path)?,
@@ -36,16 +49,6 @@ fn main() -> Result<()> {
         Commands::Stop => handle_stop_command()?,
         Commands::Restart => handle_restart_command()?,
         Commands::Status => handle_status_command()?,
-        Commands::Service { action } => handle_service_command(action)?,
-        Commands::Update => {
-            let out_dir =
-                env::current_dir().context("resolve current directory for roust update")?;
-            update::run(&out_dir)?;
-            println!(
-                "Updated ipv4.txt, ipv6.txt, ipv4_cidr.txt, ipv6_cidr.txt in {}",
-                out_dir.display()
-            );
-        }
     }
     Ok(())
 }
@@ -66,70 +69,88 @@ fn bootstrap_runtime_files() -> Result<()> {
     Ok(())
 }
 
-fn handle_route_command(action: RouteCommands) -> Result<()> {
+fn handle_predict_command(ip: &str) -> Result<()> {
+    let dest: Ipv4Addr = ip
+        .parse()
+        .map_err(|_| anyhow!("--ip must be a valid IPv4 address (e.g. 8.8.8.8)"))?;
+    let p = network::predict_ipv4_egress(dest)?;
+    println!("destination:  {}", p.dest);
+    println!("if_index:     {}", p.if_index);
+    println!("next_hop:     {}", p.next_hop);
+    match (&p.nic_name, &p.nic_display) {
+        (Some(name), Some(disp)) => {
+            println!("nic (name):   {}", name);
+            println!("nic (desc):   {}", disp);
+        }
+        (Some(name), None) => println!("nic (name):   {}", name),
+        _ => println!(
+            "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",
+            p.if_index
+        ),
+    }
+    Ok(())
+}
+
+fn handle_rule_command(action: RuleCommands, config_path: &PathBuf) -> Result<()> {
     match action {
-        RouteCommands::Predict { dest } => {
-            let ip: Ipv4Addr = dest
-                .parse()
-                .map_err(|_| anyhow!("--dest must be a valid IPv4 address (e.g. 8.8.8.8)"))?;
-            let p = network::predict_ipv4_egress(ip)?;
-            println!("destination:  {}", p.dest);
-            println!("if_index:     {}", p.if_index);
-            println!("next_hop:     {}", p.next_hop);
-            match (&p.nic_name, &p.nic_display) {
-                (Some(name), Some(disp)) => {
-                    println!("nic (name):   {}", name);
-                    println!("nic (desc):   {}", disp);
-                }
-                (Some(name), None) => println!("nic (name):   {}", name),
-                _ => println!(
-                    "nic:          (no adapter matched if_index {}; check GetAdaptersInfo vs route table)",
-                    p.if_index
-                ),
+        RuleCommands::List => {
+            if !config_path.exists() {
+                println!("No routing rules ({} not found).", config_path.display());
+                return Ok(());
+            }
+            let config = Config::load(config_path)?;
+            let rules = config.get_rules();
+            if rules.is_empty() {
+                println!("No routing rules in {}.", config_path.display());
+                return Ok(());
+            }
+            println!("Rules from {} ({}):", config_path.display(), rules.len());
+            println!(
+                "\n{:<24} {:<18} {:<18}",
+                "IP / CIDR", "Gateway", "rewrite_to"
+            );
+            println!("{}", "-".repeat(64));
+            for rule in rules {
+                let rewrite = rule.rewrite_to.as_deref().unwrap_or("-");
+                println!(
+                    "{:<24} {:<18} {:<18}",
+                    rule.ip, rule.gateway, rewrite
+                );
             }
         }
     }
     Ok(())
 }
 
-fn handle_nics_command(action: NicCommands) -> Result<()> {
-    match action {
-        NicCommands::List => {
-            println!(
-                "\n{:<20} {:<40} {:<20} {:<15} {:<20}",
-                "Name", "Description", "MAC Address", "Type", "IPv4 Address"
-            );
-            println!("{}", "-".repeat(120));
-            let interfaces = enumerate_interfaces()?;
-            for nic in &interfaces {
-                let ipv4 = nic.ipv4_address.as_deref().unwrap_or("N/A");
-                println!(
-                    "{:<20} {:<40} {:<20} {:<15} {:<20}",
-                    nic.name, nic.display_name, nic.mac_address, nic.status, ipv4
-                );
-            }
-            Ok(())
-        }
+fn notify_live_apply() {
+    match service::is_active() {
+        Ok(true) => println!("Changes apply automatically to the running service."),
+        Ok(false) => println!("Start the service with `roust start` to apply rules."),
+        Err(_) => {}
     }
 }
 
 fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     let RuleAction::Rule {
         ip,
-        nic,
+        gateway,
         file,
         rewrite_to,
     } = action;
     let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
     let interfaces = enumerate_interfaces()?;
-    let validate_nic = |nic_name: &str| -> Result<()> {
-        if interfaces
-            .iter()
-            .any(|n| network::nic_name_matches(n, nic_name))
-        {
+    let gateway_index_map = build_routing_gateway_index_map(&interfaces)?;
+    let validate_gateway = |gateway_str: &str| -> Result<()> {
+        let gw: Ipv4Addr = gateway_str
+            .parse()
+            .map_err(|_| anyhow!("Invalid gateway '{}'", gateway_str))?;
+        if gateway_exists_on_host(gw, &gateway_index_map) {
             Ok(())
         } else {
-            Err(anyhow!("Interface '{}' not found", nic_name))
+            Err(anyhow!(
+                "Gateway '{}' is not a default gateway on this machine (check ipconfig or route print)",
+                gateway_str
+            ))
         }
     };
 
@@ -137,32 +158,33 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
         let content = fs::read_to_string(&file_path)?;
         let imported = Config::parse_import_file(&content, &file_path)?;
         for rule in imported {
-            let dest = if rule.nic.is_empty() {
-                nic.as_ref()
+            let dest = if rule.gateway.is_empty() {
+                gateway.as_ref()
                     .ok_or_else(|| {
                         anyhow!(
-                            "Each entry in {} needs a \"nic\", or pass --nic for IP-only lists",
+                            "Each entry in {} needs a \"gateway\", or pass --gateway for IP-only lists",
                             file_path.display()
                         )
                     })?
                     .clone()
             } else {
-                rule.nic
+                rule.gateway
             };
-            validate_nic(&dest)?;
+            validate_gateway(&dest)?;
             let rule_rewrite = rule.rewrite_to.or_else(|| rewrite_to.clone());
             config.add_rule(rule.ip, dest, rule_rewrite)?;
         }
-    } else if let (Some(ip_addr), Some(dest)) = (ip, nic) {
-        validate_nic(&dest)?;
+    } else if let (Some(ip_addr), Some(dest)) = (ip, gateway) {
+        validate_gateway(&dest)?;
         config.add_rule(ip_addr, dest, rewrite_to)?;
     } else {
         return Err(anyhow!(
-            "Provide --ip and --nic, or --file (e.g. routes.json with ip and nic per entry)"
+            "Provide --ip and --gateway, or --file (e.g. routes.json with ip and gateway per entry)"
         ));
     }
     config.save(config_path)?;
     println!("Rule(s) added successfully.");
+    notify_live_apply();
     Ok(())
 }
 
@@ -173,6 +195,7 @@ fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
         if config.remove_rule(&ip_addr) {
             config.save(config_path)?;
             println!("Rule deleted successfully.");
+            notify_live_apply();
         } else {
             println!("Rule not found.");
         }
@@ -183,16 +206,28 @@ fn handle_delete_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
     let RuleAction::Rule {
         ip,
-        nic,
+        gateway,
         rewrite_to,
         ..
     } = action;
-    if let (Some(ip_addr), Some(new_nic)) = (ip, nic) {
+    if let (Some(ip_addr), Some(new_gateway)) = (ip, gateway) {
+        let interfaces = enumerate_interfaces()?;
+        let gateway_index_map = build_routing_gateway_index_map(&interfaces)?;
+        let gw: Ipv4Addr = new_gateway
+            .parse()
+            .map_err(|_| anyhow!("Invalid gateway '{}'", new_gateway))?;
+        if !gateway_exists_on_host(gw, &gateway_index_map) {
+            return Err(anyhow!(
+                "Gateway '{}' is not a default gateway on this machine (check ipconfig or route print)",
+                new_gateway
+            ));
+        }
         let mut config = Config::load(config_path)?;
         config.remove_rule(&ip_addr);
-        config.add_rule(ip_addr, new_nic, rewrite_to)?;
+        config.add_rule(ip_addr, new_gateway, rewrite_to)?;
         config.save(config_path)?;
         println!("Rule edited successfully.");
+        notify_live_apply();
     }
     Ok(())
 }
@@ -200,8 +235,8 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 fn handle_start_command() -> Result<()> {
     if !service::is_installed()? {
         return Err(anyhow!(
-            "The packet router runs as a Windows service. Install it first (elevated PowerShell):\n  \
-             roust service install\nThen start it:\n  roust start"
+            "The packet router runs as a Windows service. Install it first (elevated PowerShell), e.g. re-run installer.ps1 or:\n  \
+             roust --install-service\nThen start it:\n  roust start"
         ));
     }
     service::start()
@@ -217,11 +252,4 @@ fn handle_restart_command() -> Result<()> {
 
 fn handle_status_command() -> Result<()> {
     service::print_status()
-}
-
-fn handle_service_command(action: ServiceCommands) -> Result<()> {
-    match action {
-        ServiceCommands::Install { auto } => service::install(auto),
-        ServiceCommands::Uninstall => service::uninstall(),
-    }
 }

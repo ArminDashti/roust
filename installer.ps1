@@ -1,23 +1,53 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build roust.exe and install it to C:\Program Files\Roust.
+  Build roust.exe and install it to .\Roust under the current directory.
 
 .DESCRIPTION
-  1. Stops running roust processes.
-  2. Removes any existing roust.exe in the install folder.
-  3. Builds the release binary with Cargo.
-  4. Moves roust.exe into the install folder.
-  5. Ensures the install folder is on the user PATH (for PowerShell/cmd).
-  6. Ensures routes.json exists in the install folder.
-  7. Copies WinDivert runtime files (WinDivert.dll, WinDivert64.sys) beside roust.exe.
+  1. Stops the Roust Windows service (if installed and running).
+  2. Stops any other running roust processes.
+  3. Deletes all files in the install folder.
+  4. Builds the release binary with Cargo.
+  5. Installs roust.exe and runtime files into the install folder.
+  6. Adds the install folder to the user PATH environment variable.
+  7. Ensures routes.json exists in the install folder.
+  8. Copies WinDivert runtime files (WinDivert.dll, WinDivert64.sys) beside roust.exe.
+
+  Default install folder: <current directory>\Roust
+  Custom install folder:   .\installer.ps1 --path=C:\path\to\folder
 #>
 param(
-    [string]$InstallDir = 'C:\Program Files\Roust',
+    [string]$InstallDir,
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Capture the caller's working directory before we cd into the repo for the build.
+$WorkingDir = (Get-Location).Path
+
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    foreach ($arg in $args) {
+        if ($arg -match '^\-\-path\s*=\s*(.+)$') {
+            $InstallDir = $Matches[1].Trim().Trim('"', "'")
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+        for ($i = 0; $i -lt $args.Count; $i++) {
+            if ($args[$i] -eq '--path' -and ($i + 1) -lt $args.Count) {
+                $InstallDir = $args[$i + 1].Trim().Trim('"', "'")
+                break
+            }
+        }
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    $InstallDir = Join-Path $WorkingDir 'Roust'
+}
+
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 
 # Resolve repository root from the folder that contains this script.
 $RepoRoot = $PSScriptRoot
@@ -37,6 +67,33 @@ function Write-Step {
     Write-Host "==> $Message"
 }
 
+function Stop-RoustService {
+    # Stop the Windows service so install files are not locked.
+    $serviceName = 'Roust'
+    $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -in @('Running', 'StartPending', 'PausePending', 'ContinuePending')) {
+            Write-Step "Stopping Windows service '$serviceName'..."
+            Stop-Service -Name $serviceName -Force -ErrorAction Stop
+            $svc.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, (New-TimeSpan -Seconds 30))
+        }
+        return
+    }
+
+    $stopExe = $null
+    if (Test-Path -LiteralPath $InstallExe) {
+        $stopExe = $InstallExe
+    }
+    else {
+        $cmd = Get-Command -Name 'roust' -ErrorAction SilentlyContinue
+        if ($cmd) { $stopExe = $cmd.Source }
+    }
+    if ($stopExe) {
+        Write-Step 'Stopping Windows service via roust stop...'
+        & $stopExe stop 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+}
+
 function Stop-RoustProcesses {
     # Stop any running roust CLI or router process so files can be replaced.
     $names = @('roust')
@@ -50,12 +107,13 @@ function Stop-RoustProcesses {
     }
 }
 
-function Remove-InstalledExe {
-    # Delete the previous install binary when it is already on disk.
-    if (Test-Path -LiteralPath $InstallExe) {
-        Write-Step "Removing existing $InstallExe"
-        Remove-Item -LiteralPath $InstallExe -Force
+function Clear-InstallDirectory {
+    # Remove every file and subdirectory in the install folder before a fresh install.
+    if (-not (Test-Path -LiteralPath $InstallDir)) {
+        return
     }
+    Write-Step "Deleting all files in $InstallDir ..."
+    Get-ChildItem -LiteralPath $InstallDir -Force | Remove-Item -Recurse -Force
 }
 
 function Build-RoustRelease {
@@ -75,7 +133,7 @@ function Build-RoustRelease {
 }
 
 function Install-RoustExe {
-    # Create install folder and move (cut) the built exe into Program Files.
+    # Create install folder and move (cut) the built exe into the install directory.
     if (-not (Test-Path -LiteralPath $InstallDir)) {
         Write-Step "Creating install directory $InstallDir"
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -162,19 +220,34 @@ function Test-RoustOnPath {
     return $false
 }
 
-# Program Files writes require elevation on Windows.
+function Test-InstallDirRequiresElevation {
+    $installFull = [System.IO.Path]::GetFullPath($InstallDir)
+    foreach ($root in @(
+            [Environment]::GetFolderPath('ProgramFiles'),
+            [Environment]::GetFolderPath('ProgramFilesX86')
+        )) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $rootFull = [System.IO.Path]::GetFullPath($root)
+        if ($installFull.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
-if (-not $isAdmin) {
-    throw 'Run this script in an elevated PowerShell (Run as administrator) to install under Program Files.'
+if ((Test-InstallDirRequiresElevation) -and -not $isAdmin) {
+    throw "Install directory '$InstallDir' is under Program Files. Run this script in an elevated PowerShell (Run as administrator), or choose another folder with --path=."
 }
 
 Write-Step "Repository root: $RepoRoot"
 Write-Step "Install directory: $InstallDir"
 
+Stop-RoustService
 Stop-RoustProcesses
-Remove-InstalledExe
+Clear-InstallDirectory
 Build-RoustRelease
 Install-RoustExe
 Add-InstallDirToUserPath
@@ -184,9 +257,9 @@ Test-RoustOnPath
 
 Write-Host ''
 Write-Step 'Registering Windows service (requires elevation)...'
-& $InstallExe service install 2>&1 | ForEach-Object { Write-Host $_ }
+& $InstallExe --install-service 2>&1 | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning 'Service install failed. Run manually as Administrator: roust service install'
+    Write-Warning 'Service install failed. Run manually as Administrator: roust --install-service'
 } else {
     Write-Step 'Starting Windows service...'
     & $InstallExe start 2>&1 | ForEach-Object { Write-Host $_ }

@@ -47,7 +47,7 @@ anyhow = "1.0"
 # Windows Service Control Manager integration
 windows-service = "0.7"
 
-# HTTP (blocking) for `roust update`
+# HTTP (blocking) for roust-setup IP list downloads
 ureq = "2.12"
 
 # ZIP extraction for `roust-setup` (WinDivert distribution); pin 0.6 for Rust 1.83 CI toolchains.

@@ -1,15 +1,44 @@
 use super::EgressPrediction;
 use super::NetworkInterface;
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use windows::Win32::NetworkManagement::IpHelper::*;
 use windows::Win32::Networking::WinSock::{AF_INET, AF_UNSPEC, SOCKADDR_IN};
 
-pub fn nic_name_matches(nic: &NetworkInterface, nic_name: &str) -> bool {
-    [Some(nic.name.as_str()), Some(nic.display_name.as_str()), nic.friendly_name.as_deref()]
-        .into_iter()
-        .flatten()
-        .any(|label| label.eq_ignore_ascii_case(nic_name))
+pub(crate) fn insert_gateway_mapping(
+    map: &mut HashMap<Ipv4Addr, u32>,
+    gateway: Ipv4Addr,
+    if_index: u32,
+) -> Result<()> {
+    if gateway.is_unspecified() {
+        return Ok(());
+    }
+    match map.get(&gateway) {
+        Some(&existing) if existing != if_index => Err(anyhow!(
+            "default gateway {gateway} is reported on interface indices {existing} and {if_index}"
+        )),
+        Some(_) => Ok(()),
+        None => {
+            map.insert(gateway, if_index);
+            Ok(())
+        }
+    }
+}
+
+/// Map each interface's default gateway (IPv4) to its `if_index` (adapter list only).
+pub fn build_gateway_index_map(interfaces: &[NetworkInterface]) -> Result<HashMap<Ipv4Addr, u32>> {
+    let mut map = HashMap::new();
+    for nic in interfaces {
+        if let Some(gw) = nic.default_gateway {
+            insert_gateway_mapping(&mut map, gw, nic.if_index)?;
+        }
+    }
+    Ok(map)
+}
+
+pub fn gateway_exists_on_host(gateway: Ipv4Addr, gateway_index_map: &HashMap<Ipv4Addr, u32>) -> bool {
+    gateway_index_map.contains_key(&gateway)
 }
 
 fn if_type_label(if_type: u32) -> String {

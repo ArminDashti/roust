@@ -15,17 +15,16 @@ flowchart TB
     subgraph CLI["roust.exe (main binary)"]
         Parse[CLI parser - clap]
         ConfigIO[Config load/save - JSON]
-        NicCmd[nics list]
-        RouteCmd[route predict]
+        RuleList[rule list]
+        PredictCmd[predict --ip]
         RuleCmd[add / delete / edit rules]
         Start[roust start]
-        Update[roust update]
     end
 
     subgraph Core["Packet engine"]
         Router[PacketRouter]
         Match[Rule matching - IP/CIDR/*]
-        NICMap[NIC name → if_index map]
+        GwMap[default gateway → if_index map]
         WinDiv[WinDivert recv/send loop]
     end
 
@@ -36,17 +35,16 @@ flowchart TB
     end
 
     Parse --> ConfigIO
-    Parse --> NicCmd
-    Parse --> RouteCmd
+    Parse --> RuleList
+    Parse --> PredictCmd
     Parse --> RuleCmd
     Parse --> Start
-    Parse --> Update
     Start --> Router
     ConfigIO --> Router
     Router --> Match
-    Router --> NICMap
-    NICMap --> Adapters
-    RouteCmd --> BestRoute
+    Router --> GwMap
+    GwMap --> Adapters
+    PredictCmd --> BestRoute
     BestRoute --> Adapters
     Router --> WinDiv
     WinDiv --> Driver
@@ -56,7 +54,7 @@ flowchart TB
 
 | Artifact | Path | Role |
 |----------|------|------|
-| `roust.exe` | `src/main.rs` | Main CLI: rules, NIC listing, route prediction, `start` / `update` |
+| `roust.exe` | `src/main.rs` | Main CLI: rules, rule list, egress prediction, `start` / `stop` / `status` |
 | `roust-setup.exe` | `src/bin/roust-setup.rs` | Post-install: WinDivert ZIP, IP lists, user PATH |
 | Library | `src/lib.rs` | Shared `setup` and `update` modules |
 
@@ -88,7 +86,7 @@ You can override with `--config <path>`.
 [
   {
     "ip": "192.168.1.0/24",
-    "nic": "Ethernet",
+    "gateway": "192.168.1.1",
     "rewrite_to": "10.0.0.1"
   }
 ]
@@ -97,7 +95,7 @@ You can override with `--config <path>`.
 | Field | Meaning |
 |-------|---------|
 | `ip` | Exact IPv4/IPv6 string, CIDR (e.g. `10.0.0.0/8`), or `*` (match all) |
-| `nic` | Adapter **name** or **description** from `GetAdaptersInfo` (case-insensitive) |
+| `gateway` | Default gateway IPv4 of the target interface |
 | `rewrite_to` | Optional: replace destination IPv4 in the packet before reinject |
 
 **Matching order:** Rules are scanned in array order; the **first** matching rule wins (`config::Config::find_compiled` on the in-memory compiled table at runtime).
@@ -106,41 +104,37 @@ You can override with `--config <path>`.
 
 ## CLI commands
 
-### Network discovery
+### Egress prediction (no WinDivert)
 
-- **`roust nics list`** — Enumerates adapters via `GetAdaptersInfo`: name, description, MAC, type, primary IPv4.
-
-### Routing table (no WinDivert)
-
-- **`roust route predict --dest <ipv4>`** — Calls `GetBestRoute` for the destination and prints `if_index`, next hop, and matched NIC name/description. This is what Windows would use **before** any roust rule is applied.
+- **`roust predict --ip <ipv4>`** — Calls `GetBestRoute` for the destination and prints `if_index`, next hop, and matched NIC name/description. This is what Windows would use **before** any roust rule is applied.
 
 ### Rule management
 
-Subcommands `add`, `delete`, `edit` use a shared `Rule` action with flags:
+- **`roust rule list`** — Prints all rules from `routes.json` (or `--config` path).
+
+Subcommands `add`, `delete`, `edit` use a shared `rule` action with flags:
 
 - `--ip` — Single destination or CIDR  
-- `--nic` / `--dest` — Target interface (CLI uses `nic` in code)  
+- `--gateway` — Default gateway IPv4 of the target interface  
 - `--rewrite-to` — Optional destination rewrite  
 - `--file` — Bulk import from `.json` array or line-oriented text file  
 
-On `add`, the NIC name is validated against live interfaces.
+On `add` and `edit`, the gateway must match a default gateway on a local interface (adapter list + IPv4 forward table). While the service is running, rule changes take effect automatically within about one second (config file watcher); restart is only needed after binary updates.
 
 ### Router lifecycle
 
 | Command | Behavior |
 |---------|----------|
-| `roust service install` | Register the **Roust** Windows service (elevated; optional `--auto` for boot start) |
-| `roust service uninstall` | Remove the service registration |
 | `roust start` | Start the Windows service (SCM runs `roust.exe --run-as-service`) |
 | `roust stop` | Stop the Windows service |
 | `roust restart` | Stop then start the service |
 | `roust status` | Print SCM state and config path |
 
+Service registration is done by **installer.ps1** or the hidden flag `roust --install-service` (elevated). Unregister with `roust --uninstall-service`.
+
 ### IP list updates
 
-- **`roust update`** — Downloads Iran aggregated JSON from ipverse (overridable via `ROUST_IR_AGGREGATED_JSON_URL`), writes `iran_aggregated.json`, `ipv4.txt`, `ipv6.txt`, `ipv4_cidr.txt`, `ipv6_cidr.txt` in the **current working directory**.
-
-Setup also downloads **private** lists via `update::run_private_ips` → `private_ips.json`, `private_ips.txt`, `private_ips_cidr.txt`.
+**roust-setup** downloads Iran aggregated and private IP lists via `update::run` and `update::run_private_ips` → `iran_aggregated.json`, `ipv4.txt`, `ipv6.txt`, `ipv4_cidr.txt`, `ipv6_cidr.txt`, `private_ips.json`, etc. in the install directory.
 
 ## Packet routing pipeline (`roust start`)
 
@@ -160,8 +154,8 @@ sequenceDiagram
     R->>R: outbound? match dst : match src
     R->>CFG: find_compiled(peer IP)
     alt rule matches
-        CFG-->>R: nic + optional rewrite_to
-        R->>R: set address.Network.IfIdx from NIC map
+        CFG-->>R: gateway + optional rewrite_to
+        R->>R: kernel routes installed at start (if_index from gateway map)
         opt rewrite_to set
             R->>R: outbound: patch dst; inbound: patch src
             R->>R: recalc header checksum
@@ -183,7 +177,7 @@ sequenceDiagram
 
 1. **Direction** — Read `WinDivertAddress.Outbound`: outbound packets use destination matching; inbound packets use source matching (the remote peer for traffic in both directions).  
 2. **Match** — `Config::find_compiled` against pre-parsed rule patterns (exact, CIDR, or `*`).  
-3. **Redirect interface** — Look up `nic` in a map built at start: adapter name and display name (lowercase) → `if_index` from `GetAdaptersInfo`. Set `WinDivertAddress` network union field `if_idx` for reinject on the same path (inbound vs outbound).  
+3. **Redirect interface** — At start, each rule’s `gateway` is resolved to `if_index` via `GetAdaptersAddresses` gateways and the IPv4 forward table (`0.0.0.0/0` per interface). Matching prefixes get `route add … via <gateway> IF <if_index>`; WinDivert does not set outbound `IfIdx`.  
 4. **Optional rewrite** — If `rewrite_to` is set: outbound packets rewrite **destination**; inbound packets rewrite **source** (symmetric to split-tunnel semantics). Recompute the IPv4 header checksum.  
 5. **Checksums** — `WinDivertHelperCalcChecksums` when the IPv4 header was modified.  
 6. **Reinject** — **Every** packet is sent back (matched or not) so nothing is dropped.
@@ -196,14 +190,15 @@ A console Ctrl+C handler sets a global atomic flag and calls `WinDivertShutdown`
 
 ### Interface enumeration (`network/win.rs`)
 
-Uses legacy `GetAdaptersInfo` to collect:
+Uses `GetAdaptersAddresses` (`GAA_FLAG_INCLUDE_GATEWAYS`) to collect:
 
 - `AdapterName` → `name`  
 - `Description` → `display_name`  
-- `Index` → `if_index` (used by WinDivert and route prediction)  
-- MAC, first IPv4, coarse type (Ethernet / WiFi / Other)
+- `FriendlyName` → optional alias  
+- `IfIndex` → `if_index` (used for host routes and route prediction)  
+- First IPv4 unicast, first IPv4 gateway, MAC, coarse type (Ethernet / WiFi / Other)
 
-### Egress prediction (`route predict`)
+### Egress prediction (`predict --ip`)
 
 `GetBestRoute(dest, 0, &mut MIB_IPFORWARDROW)` returns the forward interface index and next hop. That index is correlated with the adapter list for human-readable NIC output. This is the **kernel routing table** view, independent of roust rules.
 
@@ -250,35 +245,32 @@ The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\rous
 
 - **Privileges:** WinDivert installation and capture usually require elevation.  
 - **Scope:** **Inbound and outbound IPv4** at the network layer; IPv6 packets are not matched or rewritten (they pass through unchanged).  
-- **Rule vs route table:** `route predict` shows Windows’ choice; `start` overrides egress for matched destinations via WinDivert `if_idx`, which can differ from `GetBestRoute` for those IPs.  
-- **Windows service:** The router runs under SCM as service **Roust**; logs go to `logs/roust-service.log` in the install directory. Install with `roust service install` (admin).  
+- **Rule vs route table:** `roust predict --ip` shows Windows’ choice; `start` installs more-specific host routes for matched prefixes so egress uses the rule’s gateway/interface, which can differ from `GetBestRoute` for those IPs.  
+- **Windows service:** The router runs under SCM as service **Roust**; logs go to `logs/roust-service.log` in the install directory. Install via `installer.ps1` or `roust --install-service` (admin).  
 - **Traffic integrity:** Modified packets get checksum recalculation; unmodified packets pass through unchanged.
 
 ## Example end-to-end workflow
 
 ```powershell
-# 1. List adapters and pick a NIC name
-roust nics list
+# 1. See what Windows would do without roust
+roust predict --ip 8.8.8.8
 
-# 2. See what Windows would do without roust
-roust route predict --dest 8.8.8.8
+# 2. Add rules (file or single IP) — use each interface's default gateway IPv4
+roust add rule --file private_ips.json --gateway 192.168.1.1
+roust add rule --ip 2.144.0.0/14 --gateway 10.0.0.1
 
-# 3. Add rules (file or single IP)
-roust add --file private_ips.json --nic "Wi-Fi"
-roust add --ip 2.144.0.0/14 --nic "Ethernet"
+# 3. List configured rules
+roust rule list
 
 # 4. Start interception (admin PowerShell)
 roust start
-
-# 5. Refresh Iran list files in cwd
-roust update
 ```
 
 ## Planned / partial features
 
 - Service recovery actions (restart on failure) and richer `status` output.  
 - Deeper use of `settings.json` for state beyond routing rules.  
-- CLI help examples reference `roust ip dest …` style commands; the implemented surface uses `add` / `delete` / `edit` with `--ip` and `--nic` flags (see `src/cli/mod.rs`).
+- Old configs used `"nic": "Ethernet"`; that field is rejected with a migration message. Use `"gateway": "<ipv4>"` (default gateway of the target interface).
 
 ## Related files
 
