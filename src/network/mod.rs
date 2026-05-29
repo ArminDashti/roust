@@ -1,9 +1,12 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
+    /// Internal adapter name (GUID-style string from the OS).
     pub name: String,
+    /// Hardware/driver description from the OS.
     pub display_name: String,
     /// Windows interface alias (e.g. `Ethernet`, `Wi-Fi`) from `GetAdaptersAddresses`.
     pub friendly_name: Option<String>,
@@ -13,6 +16,26 @@ pub struct NetworkInterface {
     pub ipv4_address: Option<String>,
     pub status: String,
 }
+
+impl NetworkInterface {
+    /// Match a rule NIC field against internal name, description, or friendly name.
+    pub fn matches_alias(&self, nic: &str) -> bool {
+        self.name.eq_ignore_ascii_case(nic)
+            || self.display_name.eq_ignore_ascii_case(nic)
+            || self
+                .friendly_name
+                .as_deref()
+                .is_some_and(|alias| alias.eq_ignore_ascii_case(nic))
+    }
+}
+
+pub fn find_interface<'a>(
+    interfaces: &'a [NetworkInterface],
+    nic: &str,
+) -> Option<&'a NetworkInterface> {
+    interfaces.iter().find(|iface| iface.matches_alias(nic))
+}
+
 #[derive(Debug, Clone)]
 pub struct EgressPrediction {
     pub dest: Ipv4Addr,
@@ -20,6 +43,7 @@ pub struct EgressPrediction {
     pub next_hop: Ipv4Addr,
     pub nic_name: Option<String>,
     pub nic_display: Option<String>,
+    pub nic_friendly: Option<String>,
 }
 
 mod routes;
@@ -67,13 +91,18 @@ pub fn build_compiled_rules(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_enumerate_interfaces() {
         match enumerate_interfaces() {
             Ok(interfaces) => {
                 println!("Found {} network interfaces", interfaces.len());
                 for nic in &interfaces {
-                    println!("  - {} ({})", nic.name, nic.display_name);
+                    let friendly = nic.friendly_name.as_deref().unwrap_or("-");
+                    println!(
+                        "  - {} / {} ({})",
+                        friendly, nic.name, nic.display_name
+                    );
                 }
                 assert!(
                     !interfaces.is_empty(),
