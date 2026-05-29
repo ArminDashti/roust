@@ -1,18 +1,25 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+
 #[derive(Parser)]
 #[command(name = "roust")]
-#[command(about = "Windows 11 packet router - rule-based network interface routing", long_about = None)]
+#[command(about = "Windows 11 packet router - rule-based routing by interface default gateway", long_about = None)]
 #[command(version)]
 #[command(
-    after_help = "EXAMPLES:  roust nics list    List network interfaces  roust route predict --dest 8.8.8.8    Predict egress NIC for a destination  roust add --file=routes.json    Import routing rules  roust service install    Register the Windows service (elevated)  roust start    Start the router Windows service  roust stop    Stop the router Windows service  roust status    Show Windows service state  roust update    Download Iran aggregated IP list files"
+    after_help = "EXAMPLES:  roust rule list    List routing rules in routes.json  roust predict --ip 8.8.8.8    Predict egress for a destination  roust add rule --ip 10.0.0.0/8 --gateway 192.168.1.1    Add a rule  roust add rule --file routes.json    Import rules  roust start    Start the router Windows service  roust stop    Stop the router Windows service  roust status    Show started/stopped state, install directory, and version"
 )]
 
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
     #[arg(global = true, long)]
     pub config: Option<PathBuf>,
+    /// Register the Windows service (installer / automation only).
+    #[arg(long, hide = true)]
+    pub install_service: bool,
+    /// Remove the Windows service registration (installer / automation only).
+    #[arg(long, hide = true)]
+    pub uninstall_service: bool,
 }
 
 #[derive(Subcommand)]
@@ -29,23 +36,18 @@ pub enum Commands {
         #[command(subcommand)]
         action: RuleAction,
     },
+    Rule {
+        #[command(subcommand)]
+        action: RuleCommands,
+    },
+    Predict {
+        #[arg(long)]
+        ip: String,
+    },
     Start,
     Stop,
     Restart,
     Status,
-    Service {
-        #[command(subcommand)]
-        action: ServiceCommands,
-    },
-    Nics {
-        #[command(subcommand)]
-        action: NicCommands,
-    },
-    Route {
-        #[command(subcommand)]
-        action: RouteCommands,
-    },
-    Update,
 }
 
 #[derive(Subcommand)]
@@ -54,7 +56,7 @@ pub enum RuleAction {
         #[arg(long)]
         ip: Option<String>,
         #[arg(long)]
-        nic: Option<String>,
+        gateway: Option<String>,
         #[arg(long)]
         rewrite_to: Option<String>,
         #[arg(long)]
@@ -63,29 +65,11 @@ pub enum RuleAction {
 }
 
 #[derive(Subcommand)]
-pub enum NicCommands {
+pub enum RuleCommands {
+    /// List all routing rules from routes.json.
     List,
 }
 
-#[derive(Subcommand)]
-pub enum ServiceCommands {
-    /// Register the roust Windows service (requires elevation).
-    Install {
-        /// Start automatically when Windows boots (default: manual start via `roust start`).
-        #[arg(long)]
-        auto: bool,
-    },
-    /// Remove the roust Windows service registration.
-    Uninstall,
-}
-
-#[derive(Subcommand)]
-pub enum RouteCommands {
-    Predict {
-        #[arg(long)]
-        dest: String,
-    },
-}
 pub fn parse_cli() -> Cli {
     Cli::parse()
 }

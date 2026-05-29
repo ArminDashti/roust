@@ -1,6 +1,6 @@
 # roust
 
-Windows packet router with rule-based NIC routing for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (CLI) and `roust-setup.exe` (first-run setup).
+Windows packet router with rule-based routing by interface default gateway for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (CLI) and `roust-setup.exe` (first-run setup).
 
 **Technical overview:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — architecture, packet flow, config, CLI, and setup.
 
@@ -14,7 +14,7 @@ Windows packet router with rule-based NIC routing for inbound and outbound IPv4 
 
 ```powershell
 roust --help
-roust nics list
+roust rule list
 ```
 
 The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Iran/private IP lists, adds that folder to your **user** PATH, and registers a **Windows service** so the router runs in the background.
@@ -22,7 +22,6 @@ The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Ir
 After install (elevated PowerShell):
 
 ```powershell
-roust service install   # once, if not done by the installer
 roust start             # start the Windows service
 roust status            # check service state
 roust stop              # stop the service

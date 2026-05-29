@@ -1,3 +1,5 @@
+use anyhow::Result;
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
@@ -22,8 +24,45 @@ pub struct EgressPrediction {
 
 mod routes;
 mod win;
-pub use routes::{install_routes_for_rules, remove_installed_routes, InstalledRoute};
-pub use win::{enumerate_interfaces, nic_name_matches, predict_ipv4_egress};
+pub use routes::{
+    gateway_from_forward_table, install_routes_for_rules, remove_installed_routes,
+    InstalledRoute,
+};
+
+/// Build gateway → `if_index` map from adapter gateways and the IPv4 forward table.
+pub fn build_routing_gateway_index_map(
+    interfaces: &[NetworkInterface],
+) -> Result<std::collections::HashMap<Ipv4Addr, u32>> {
+    let mut map = build_gateway_index_map(interfaces)?;
+    for nic in interfaces {
+        if let Ok(gw) = gateway_from_forward_table(nic.if_index) {
+            win::insert_gateway_mapping(&mut map, gw, nic.if_index)?;
+        }
+    }
+    Ok(map)
+}
+pub use win::{build_gateway_index_map, enumerate_interfaces, gateway_exists_on_host, predict_ipv4_egress};
+
+/// Compile routing rules against the current host interfaces and gateway map.
+pub fn build_compiled_rules(
+    config: &crate::config::Config,
+) -> Result<Vec<crate::config::CompiledRule>> {
+    let interfaces = enumerate_interfaces()?;
+    let gateway_index_map = build_routing_gateway_index_map(&interfaces)?;
+    let mut ipv4_by_index = HashMap::new();
+
+    for nic in &interfaces {
+        if let Some(ip) = &nic.ipv4_address {
+            if let Ok(addr) = ip.parse::<Ipv4Addr>() {
+                if !addr.is_unspecified() && !addr.is_loopback() {
+                    ipv4_by_index.insert(nic.if_index, addr);
+                }
+            }
+        }
+    }
+
+    config.compile_rules(&gateway_index_map, &ipv4_by_index)
+}
 
 #[cfg(test)]
 mod tests {

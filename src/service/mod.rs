@@ -8,7 +8,10 @@ use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, Instant};
 use windows_service::define_windows_service;
 use windows_service::service::{
     ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceInfo,
@@ -130,7 +133,7 @@ fn run_service() -> Result<()> {
         config_path.display()
     );
     let config = Config::load(&config_path)?;
-    let router = PacketRouter::with_interfaces(config)
+    let router = PacketRouter::with_interfaces(config, config_path)
         .context("enumerate network interfaces for routing")?;
 
     status_handle
@@ -216,7 +219,7 @@ pub fn query_state() -> Result<ServiceState> {
 pub fn install(auto_start: bool) -> Result<()> {
     if is_installed()? {
         return Err(anyhow!(
-            "Windows service \"{SERVICE_NAME}\" is already installed. Run `roust service uninstall` first."
+            "Windows service \"{SERVICE_NAME}\" is already installed. Run `roust --uninstall-service` first."
         ));
     }
 
@@ -275,55 +278,188 @@ pub fn uninstall() -> Result<()> {
 }
 
 pub fn start() -> Result<()> {
+    start_service()?;
+    println!("Started Windows service \"{SERVICE_NAME}\".");
+    Ok(())
+}
+
+fn start_service() -> Result<()> {
     if !is_installed()? {
         return Err(anyhow!(
-            "Windows service \"{SERVICE_NAME}\" is not installed. Run `roust service install` as Administrator."
+            "Windows service \"{SERVICE_NAME}\" is not installed. Re-run installer.ps1 as Administrator or run `roust --install-service`."
         ));
     }
     let manager = open_service_manager(ServiceManagerAccess::CONNECT)?;
     let service = manager
         .open_service(SERVICE_NAME, ServiceAccess::START)
         .context("open roust service for start")?;
-    service.start(&service_binary_arguments()).context("start roust service")?;
-    println!("Started Windows service \"{SERVICE_NAME}\".");
+    service
+        .start(&service_binary_arguments())
+        .context("start roust service")?;
+    Ok(())
+}
+
+const FORCE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
+const FORCE_STOP_POLL: Duration = Duration::from_millis(500);
+const RESTART_START_ATTEMPTS: u32 = 3;
+
+fn service_is_active(state: ServiceState) -> bool {
+    !matches!(state, ServiceState::Stopped)
+}
+
+fn terminate_process(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F", "/T"])
+        .output();
+}
+
+/// Kill every `roust.exe` except this CLI process (orphaned foreground routers, stuck service).
+fn kill_other_roust_processes() {
+    let self_pid = std::process::id();
+    let script = format!(
+        "Get-Process -Name roust -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {self_pid} }} | Stop-Process -Force -ErrorAction SilentlyContinue"
+    );
+    let _ = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .status();
+}
+
+/// Stop the Windows service and wait; kill the service process if SCM stop hangs.
+fn force_stop() -> Result<()> {
+    if !is_installed()? {
+        kill_other_roust_processes();
+        return Ok(());
+    }
+
+    let Ok(manager) = open_service_manager(ServiceManagerAccess::CONNECT) else {
+        kill_other_roust_processes();
+        return Ok(());
+    };
+    let Ok(service) = manager.open_service(
+        SERVICE_NAME,
+        ServiceAccess::STOP | ServiceAccess::QUERY_STATUS,
+    ) else {
+        kill_other_roust_processes();
+        return Ok(());
+    };
+
+    if let Ok(status) = service.query_status() {
+        if service_is_active(status.current_state) {
+            let _ = service.stop();
+        }
+    }
+
+    let deadline = Instant::now() + FORCE_STOP_TIMEOUT;
+    loop {
+        let Ok(status) = service.query_status() else {
+            break;
+        };
+        if status.current_state == ServiceState::Stopped {
+            break;
+        }
+        if Instant::now() >= deadline {
+            log::warn!(
+                "Service \"{SERVICE_NAME}\" did not stop within {}s; terminating process",
+                FORCE_STOP_TIMEOUT.as_secs()
+            );
+            if let Some(pid) = status.process_id {
+                terminate_process(pid);
+            }
+            kill_other_roust_processes();
+            thread::sleep(Duration::from_secs(1));
+            break;
+        }
+        thread::sleep(FORCE_STOP_POLL);
+    }
+
+    kill_other_roust_processes();
     Ok(())
 }
 
 pub fn stop() -> Result<()> {
-    if !is_installed()? {
-        return Err(anyhow!(
-            "Windows service \"{SERVICE_NAME}\" is not installed."
-        ));
-    }
-    let manager = open_service_manager(ServiceManagerAccess::CONNECT)?;
-    let service = manager
-        .open_service(SERVICE_NAME, ServiceAccess::STOP)
-        .context("open roust service for stop")?;
-    let status = service.query_status().context("query service status before stop")?;
-    if status.current_state == ServiceState::Stopped {
+    let installed = is_installed().unwrap_or(false);
+    let active_before = if installed {
+        query_state()
+            .ok()
+            .map(service_is_active)
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    force_stop()?;
+
+    if !installed {
+        println!("Service \"{SERVICE_NAME}\" is not installed.");
+    } else if active_before {
+        println!("Stopped Windows service \"{SERVICE_NAME}\".");
+    } else {
         println!("Service \"{SERVICE_NAME}\" is already stopped.");
-        return Ok(());
     }
-    service.stop().context("stop roust service")?;
-    println!("Stopped Windows service \"{SERVICE_NAME}\".");
+
     Ok(())
 }
 
 pub fn restart() -> Result<()> {
-    let _ = stop();
-    start()
+    if !is_installed()? {
+        return Err(anyhow!(
+            "Windows service \"{SERVICE_NAME}\" is not installed. Run `roust service install` as Administrator."
+        ));
+    }
+
+    force_stop().context("force stop roust service before restart")?;
+
+    let mut last_err = None;
+    for attempt in 1..=RESTART_START_ATTEMPTS {
+        match start_service() {
+            Ok(()) => {
+                println!("Restarted Windows service \"{SERVICE_NAME}\".");
+                return Ok(());
+            }
+            Err(err) => {
+                if attempt < RESTART_START_ATTEMPTS {
+                    log::warn!(
+                        "Start attempt {attempt}/{RESTART_START_ATTEMPTS} failed ({err:#}); retrying after force stop"
+                    );
+                    force_stop().ok();
+                    thread::sleep(Duration::from_secs(1));
+                }
+                last_err = Some(err);
+            }
+        }
+    }
+
+    Err(last_err.unwrap()).context("start roust service after force restart")
+}
+
+pub fn is_active() -> Result<bool> {
+    if !is_installed()? {
+        return Ok(false);
+    }
+    Ok(matches!(query_state()?, ServiceState::Running))
 }
 
 pub fn print_status() -> Result<()> {
-    if !is_installed()? {
-        println!("Windows service \"{SERVICE_NAME}\": not installed");
-        println!("Install with: roust service install  (elevated PowerShell)");
-        return Ok(());
-    }
-    let state = query_state()?;
-    println!("Windows service \"{SERVICE_DISPLAY_NAME}\" ({SERVICE_NAME}): {state:?}");
     let dir = exe_install_dir()?;
-    println!("  Install dir: {}", dir.display());
-    println!("  Config:      {}", Config::default_config_path().display());
+    let state_label = if is_installed()? {
+        let state = query_state()?;
+        if service_is_active(state) {
+            "started"
+        } else {
+            "stopped"
+        }
+    } else {
+        "stopped"
+    };
+    println!("{state_label} roust");
+    println!("directory: {}", dir.display());
+    println!("version: {}", env!("CARGO_PKG_VERSION"));
     Ok(())
 }

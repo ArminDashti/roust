@@ -1,6 +1,5 @@
 use crate::config::{CompiledRule, IpMatch};
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
 use windows::Win32::Foundation::WIN32_ERROR;
@@ -98,10 +97,7 @@ fn route_delete(dest: Ipv4Addr) {
         .status();
 }
 
-pub fn install_routes_for_rules(
-    rules: &[CompiledRule],
-    gateways: &HashMap<u32, Ipv4Addr>,
-) -> Result<Vec<InstalledRoute>> {
+pub fn install_routes_for_rules(rules: &[CompiledRule]) -> Result<Vec<InstalledRoute>> {
     let mut installed = Vec::new();
 
     for rule in rules {
@@ -115,7 +111,7 @@ pub fn install_routes_for_rules(
                 log::warn!(
                     "skipping route install for wildcard rule {} → {} (too broad)",
                     rule.ip_label,
-                    rule.nic
+                    rule.gateway
                 );
                 continue;
             }
@@ -125,25 +121,19 @@ pub fn install_routes_for_rules(
             continue;
         }
 
-        let gateway = if let Some(gw) = gateways.get(&rule.if_index) {
-            *gw
-        } else {
-            gateway_from_forward_table(rule.if_index)?
-        };
-
+        let gateway = rule.gateway;
         route_add(dest, prefix_len, gateway, rule.if_index)?;
 
         log::info!(
-            "installed route {}/{} via {} on {} (if_index={})",
+            "installed route {}/{} via {} (if_index={})",
             dest,
             prefix_len,
             gateway,
-            rule.nic,
             rule.if_index
         );
         println!(
-            "[roust] Route: {}/{} → gateway {} (interface \"{}\", if_index={})",
-            dest, prefix_len, gateway, rule.nic, rule.if_index
+            "[roust] Route: {}/{} → gateway {} (if_index={})",
+            dest, prefix_len, gateway, rule.if_index
         );
 
         installed.push(InstalledRoute { dest, prefix_len });
