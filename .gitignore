@@ -1,3 +1,5 @@
 /target
 /installer/staging/
 /installer/output/
+/gui/node_modules/
+/gui/dist/

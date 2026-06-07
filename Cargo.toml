@@ -15,6 +15,9 @@ path = "src/lib.rs"
 name = "roust-setup"
 path = "src/bin/roust-setup.rs"
 
+[workspace]
+members = ["gui/src-tauri"]
+
 [dependencies]
 # CLI and argument parsing
 # Pin below 4.6 so clap_derive does not require Cargo's unstable edition2024.
