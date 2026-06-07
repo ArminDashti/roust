@@ -40,6 +40,10 @@ pub enum Commands {
         #[command(subcommand)]
         action: RuleCommands,
     },
+    Gateway {
+        #[command(subcommand)]
+        action: GatewayCommands,
+    },
     Predict {
         #[arg(long)]
         ip: String,
@@ -67,6 +71,12 @@ pub enum RuleAction {
 #[derive(Subcommand)]
 pub enum RuleCommands {
     /// List all routing rules from routes.json.
+    List,
+}
+
+#[derive(Subcommand)]
+pub enum GatewayCommands {
+    /// List default gateways on local network interfaces.
     List,
 }
 

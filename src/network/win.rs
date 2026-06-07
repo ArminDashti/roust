@@ -190,7 +190,7 @@ pub fn predict_ipv4_egress(dest: Ipv4Addr) -> Result<EgressPrediction> {
     let nic = interfaces.iter().find(|n| n.if_index == if_index).cloned();
     let nic_name = nic.as_ref().map(|n| n.name.clone());
     let nic_display = nic.as_ref().map(|n| n.display_name.clone());
-    let nic_friendly = nic.as_ref().map(|n| n.friendly_name.clone());
+    let nic_friendly = nic.as_ref().and_then(|n| n.friendly_name.clone());
 
     Ok(EgressPrediction {
         dest,
