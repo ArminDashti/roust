@@ -1,0 +1,19 @@
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: artifacts
+    image: roust:build
+    volumes:
+      - ./dist:/export
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        mkdir -p /export
+        cp /artifacts/roust.exe /artifacts/roust-setup.exe /export/
+        cp /artifacts/WinDivert.dll /artifacts/WinDivert64.sys /export/
+        echo "Wrote Windows artifacts to ./dist:"
+        ls -la /export

@@ -1,5 +1,11 @@
-/target
-/installer/staging/
-/installer/output/
+/core/target/
+/dist/
+/core/installer/staging/
+/core/installer/output/
 /gui/node_modules/
 /gui/dist/
+
+# Runtime / debug artifacts
+*.log
+*.err
+settings.json

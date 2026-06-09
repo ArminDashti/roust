@@ -1,4 +1,0 @@
-Error: enumerate network interfaces for routing
-
-Caused by:
-    routing rule 212.80.19.12 → NIC "Ethernet" has no matching interface on this machine
