@@ -1,3 +1,0 @@
-[2026-05-25T17:50:45Z INFO  roust::network::routes] installed route 212.80.19.12/32 via 192.168.1.1 on Ethernet (if_index=21)
-[2026-05-25T17:50:45Z INFO  roust::core] WinDivert handle opened (filter="ip"), 1 routing rules loaded
-[2026-05-25T17:50:45Z INFO  roust::core]   212.80.19.12 → Ethernet (if_index=21, egress_src=192.168.1.101)

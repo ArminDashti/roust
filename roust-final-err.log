@@ -1,4 +1,0 @@
-Error: enumerate network interfaces for routing
-
-Caused by:
-    no default gateway for interface index 21 (NIC "Ethernet")

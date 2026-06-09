@@ -1,0 +1,18 @@
+# Build outputs
+**/target
+dist
+
+# GUI (not built by the core Docker image)
+gui/node_modules
+gui/dist
+
+# VCS and editor
+.git
+.github
+.cursor
+
+# Runtime / local artifacts
+**/*.log
+**/settings.json
+core/installer/staging
+core/installer/output

@@ -49,18 +49,24 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 
-# Resolve repository root from the folder that contains this script.
-$RepoRoot = $PSScriptRoot
-if (-not $RepoRoot) {
-    $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+# App root is the folder that contains this script; the Rust crate lives in core/.
+$AppRoot = $PSScriptRoot
+if (-not $AppRoot) {
+    $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
-Set-Location -LiteralPath $RepoRoot
+$CoreRoot = Join-Path $AppRoot 'core'
+if (-not (Test-Path -LiteralPath $CoreRoot)) {
+    throw "Expected Rust project at $CoreRoot"
+}
+Set-Location -LiteralPath $CoreRoot
 
 $ExeName = 'roust.exe'
-$BuiltExe = Join-Path $RepoRoot 'target\release\roust.exe'
+$BuiltExe = Join-Path $CoreRoot 'target\release\roust.exe'
 $InstallExe = Join-Path $InstallDir $ExeName
 $InstallRoutes = Join-Path $InstallDir 'routes.json'
-$SourceRoutes = Join-Path $RepoRoot 'routes.json'
+$SourceRoutes = Join-Path $CoreRoot 'routes.json'
+
+. (Join-Path $AppRoot 'msvc-env.ps1')
 
 function Write-Step {
     param([string]$Message)
@@ -116,65 +122,13 @@ function Clear-InstallDirectory {
     Get-ChildItem -LiteralPath $InstallDir -Force | Remove-Item -Recurse -Force
 }
 
-function Test-LinkExeOnPath {
-    return $null -ne (Get-Command -Name 'link.exe' -ErrorAction SilentlyContinue)
-}
-
-function Get-VsInstallWithVcTools {
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (-not (Test-Path -LiteralPath $vswhere)) {
-        return $null
-    }
-    $path = & $vswhere -latest -products * `
-        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-        -property installationPath 2>$null
-    if ([string]::IsNullOrWhiteSpace($path)) {
-        return $null
-    }
-    return $path.Trim()
-}
-
-function Import-MsvcDevEnvironment {
-    param([string]$VsInstallPath)
-    $devShell = Join-Path $VsInstallPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
-    if (-not (Test-Path -LiteralPath $devShell)) {
-        return $false
-    }
-    Import-Module -Name $devShell -ErrorAction Stop
-    Enter-VsDevShell -VsInstallPath $VsInstallPath -SkipAutomaticLocation -Arch amd64 -HostArch amd64 | Out-Null
-    return (Test-LinkExeOnPath)
-}
-
-function Ensure-MsvcLinker {
-    if (Test-LinkExeOnPath) {
-        return
-    }
-    $vsInstall = Get-VsInstallWithVcTools
-    if ($vsInstall -and (Import-MsvcDevEnvironment -VsInstallPath $vsInstall)) {
-        Write-Step 'Loaded MSVC environment from Visual Studio (link.exe was not on PATH).'
-        return
-    }
-    $hint = @(
-        'The MSVC linker (link.exe) is required to build roust.exe but was not found.'
-        ''
-        'Install one of the following, then open a new PowerShell window and re-run installer.ps1:'
-        '  - Visual Studio Build Tools: https://visualstudio.microsoft.com/downloads/'
-        '    (Workload: "Desktop development with C++")'
-        '  - Visual Studio with the same C++ workload'
-        ''
-        'Rust is already using the x86_64-pc-windows-msvc toolchain; VS Code alone is not enough.'
-        'See README.md → Build Windows `.exe` files yourself → Prerequisites.'
-    ) -join [Environment]::NewLine
-    throw $hint
-}
-
 function Build-RoustRelease {
     # Compile the release executable with Cargo (export step).
     if ($SkipBuild -and (Test-Path -LiteralPath $BuiltExe)) {
         Write-Step "Skipping build; using existing $BuiltExe"
         return
     }
-    Ensure-MsvcLinker
+    Ensure-MsvcLinker -ScriptName 'installer.ps1'
     Write-Step 'Building release binary (cargo build --release)...'
     & cargo build --release
     if ($LASTEXITCODE -ne 0) {
@@ -234,7 +188,7 @@ function Add-InstallDirToUserPath {
 
 function Install-WinDivertRuntime {
     # roust.exe loads WinDivert.dll from its own directory at runtime.
-    $windivertDir = Join-Path $RepoRoot 'WinDivert-2.2.2-A\x64'
+    $windivertDir = Join-Path $CoreRoot 'WinDivert-2.2.2-A\x64'
     $required = @('WinDivert.dll', 'WinDivert64.sys')
     foreach ($name in $required) {
         $source = Join-Path $windivertDir $name
@@ -295,7 +249,8 @@ if ((Test-InstallDirRequiresElevation) -and -not $isAdmin) {
     throw "Install directory '$InstallDir' is under Program Files. Run this script in an elevated PowerShell (Run as administrator), or choose another folder with --path=."
 }
 
-Write-Step "Repository root: $RepoRoot"
+Write-Step "App root: $AppRoot"
+Write-Step "Core project: $CoreRoot"
 Write-Step "Install directory: $InstallDir"
 
 Build-RoustRelease
