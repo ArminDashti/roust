@@ -1,15 +1,12 @@
 //! Shared application logic for CLI and GUI frontends.
 
 use crate::config::{Config, RoutingRule};
-use crate::network::{
-    build_routing_gateway_index_map, enumerate_interfaces, gateway_exists_on_host,
-    predict_ipv4_egress, EgressPrediction,
-};
+use crate::network::{build_adapter_maps, enumerate_interfaces, predict_ipv4_egress, EgressPrediction};
+use std::net::Ipv4Addr;
 use crate::service;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::fs;
-use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +20,7 @@ pub struct ServiceStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct GatewayRow {
     pub nic_name: String,
+    pub mac: String,
     pub gateway_ip: String,
 }
 
@@ -76,6 +74,7 @@ pub fn list_gateways() -> Result<Vec<GatewayRow>> {
             .unwrap_or(&nic.name);
         rows.push(GatewayRow {
             nic_name: nic_name.to_string(),
+            mac: nic.mac_address.to_ascii_uppercase(),
             gateway_ip: gateway.to_string(),
         });
     }
@@ -100,19 +99,42 @@ fn predict_result_from_egress(p: &EgressPrediction) -> PredictResult {
     }
 }
 
-fn validate_gateway(gateway_str: &str) -> Result<()> {
-    let gw: Ipv4Addr = gateway_str
-        .parse()
-        .map_err(|_| anyhow!("Invalid gateway '{gateway_str}'"))?;
-    let interfaces = enumerate_interfaces()?;
-    let gateway_index_map = build_routing_gateway_index_map(&interfaces)?;
-    if gateway_exists_on_host(gw, &gateway_index_map) {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "Gateway '{gateway_str}' is not a default gateway on this machine"
-        ))
+/// Validate that at least one target field is provided and each value exists on a local adapter.
+fn validate_targets(mac: Option<&str>, nic: Option<&str>, gateway: Option<&str>) -> Result<()> {
+    if mac.is_none() && nic.is_none() && gateway.is_none() {
+        return Err(anyhow!(
+            "provide at least one of --mac, --nic, or --gateway \
+             (run `roust gateway list` to see adapters)"
+        ));
     }
+    let interfaces = enumerate_interfaces()?;
+    let (mac_map, nic_map, gw_map) = build_adapter_maps(&interfaces);
+    if let Some(m) = mac {
+        if !mac_map.contains_key(&m.to_ascii_uppercase()) {
+            return Err(anyhow!(
+                "MAC '{m}' not found on any local interface \
+                 (run `roust gateway list` to see MACs)"
+            ));
+        }
+    }
+    if let Some(n) = nic {
+        if !nic_map.contains_key(&n.to_ascii_lowercase()) {
+            return Err(anyhow!(
+                "NIC name '{n}' not found on any local interface \
+                 (run `roust gateway list` to see names)"
+            ));
+        }
+    }
+    if let Some(g) = gateway {
+        let gw: Ipv4Addr = g.parse().map_err(|_| anyhow!("invalid gateway IP '{g}'"))?;
+        if !gw_map.contains_key(&gw) {
+            return Err(anyhow!(
+                "gateway '{g}' is not a default gateway on any local interface \
+                 (run `roust gateway list` to see gateways)"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn live_apply_hint() -> Option<String> {
@@ -126,12 +148,14 @@ fn live_apply_hint() -> Option<String> {
 pub fn add_rule(
     config_path: &Path,
     ip: String,
-    gateway: String,
+    mac: Option<String>,
+    nic: Option<String>,
+    gateway: Option<String>,
     rewrite_to: Option<String>,
 ) -> Result<RuleMutationResult> {
-    validate_gateway(&gateway)?;
+    validate_targets(mac.as_deref(), nic.as_deref(), gateway.as_deref())?;
     let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
-    config.add_rule(ip, gateway, rewrite_to)?;
+    config.add_rule(ip, mac, nic, gateway, rewrite_to)?;
     config.save(config_path)?;
     Ok(RuleMutationResult {
         message: "Rule added successfully.".into(),
@@ -142,6 +166,8 @@ pub fn add_rule(
 pub fn import_rules_from_file(
     config_path: &Path,
     file_path: &Path,
+    default_mac: Option<String>,
+    default_nic: Option<String>,
     default_gateway: Option<String>,
     rewrite_to: Option<String>,
 ) -> Result<RuleMutationResult> {
@@ -150,22 +176,14 @@ pub fn import_rules_from_file(
     let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
 
     for rule in imported {
-        let dest = if rule.gateway.is_empty() {
-            default_gateway
-                .as_ref()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Each entry in {} needs a gateway, or provide a default gateway",
-                        file_path.display()
-                    )
-                })?
-                .clone()
-        } else {
-            rule.gateway
-        };
-        validate_gateway(&dest)?;
+        let mac = rule.mac.or_else(|| default_mac.clone());
+        let nic = rule.nic.or_else(|| default_nic.clone());
+        let gateway = rule.gateway.or_else(|| default_gateway.clone());
+        validate_targets(mac.as_deref(), nic.as_deref(), gateway.as_deref()).map_err(|e| {
+            anyhow!("entry {} in {}: {e}", rule.ip, file_path.display())
+        })?;
         let rule_rewrite = rule.rewrite_to.or_else(|| rewrite_to.clone());
-        config.add_rule(rule.ip, dest, rule_rewrite)?;
+        config.add_rule(rule.ip, mac, nic, gateway, rule_rewrite)?;
     }
 
     config.save(config_path)?;
@@ -194,13 +212,15 @@ pub fn delete_rule(config_path: &Path, ip: &str) -> Result<RuleMutationResult> {
 pub fn edit_rule(
     config_path: &Path,
     ip: String,
-    gateway: String,
+    mac: Option<String>,
+    nic: Option<String>,
+    gateway: Option<String>,
     rewrite_to: Option<String>,
 ) -> Result<RuleMutationResult> {
-    validate_gateway(&gateway)?;
+    validate_targets(mac.as_deref(), nic.as_deref(), gateway.as_deref())?;
     let mut config = Config::load(config_path)?;
     config.remove_rule(&ip);
-    config.add_rule(ip, gateway, rewrite_to)?;
+    config.add_rule(ip, mac, nic, gateway, rewrite_to)?;
     config.save(config_path)?;
     Ok(RuleMutationResult {
         message: "Rule updated successfully.".into(),

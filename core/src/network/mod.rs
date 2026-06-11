@@ -1,3 +1,4 @@
+use crate::config::MacEntry;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -52,40 +53,48 @@ pub use routes::{
     gateway_from_forward_table, install_routes_for_rules, remove_installed_routes,
     InstalledRoute,
 };
-
-/// Build gateway → `if_index` map from adapter gateways and the IPv4 forward table.
-pub fn build_routing_gateway_index_map(
-    interfaces: &[NetworkInterface],
-) -> Result<std::collections::HashMap<Ipv4Addr, u32>> {
-    let mut map = build_gateway_index_map(interfaces)?;
-    for nic in interfaces {
-        if let Ok(gw) = gateway_from_forward_table(nic.if_index) {
-            win::insert_gateway_mapping(&mut map, gw, nic.if_index)?;
-        }
-    }
-    Ok(map)
-}
 pub use win::{build_gateway_index_map, enumerate_interfaces, gateway_exists_on_host, predict_ipv4_egress};
 
-/// Compile routing rules against the current host interfaces and gateway map.
+/// Build MAC, NIC-name, and gateway-IP lookup maps from live adapter enumeration.
+///
+/// NIC name map is keyed by lowercase friendly name, display name, and internal name
+/// so lookups are case-insensitive. Priority at rule-compile time: MAC > NIC > gateway.
+pub fn build_adapter_maps(
+    interfaces: &[NetworkInterface],
+) -> (HashMap<String, MacEntry>, HashMap<String, MacEntry>, HashMap<Ipv4Addr, MacEntry>) {
+    let mut mac_map = HashMap::new();
+    let mut nic_map = HashMap::new();
+    let mut gw_map = HashMap::new();
+    for nic in interfaces {
+        let gateway = nic
+            .default_gateway
+            .or_else(|| gateway_from_forward_table(nic.if_index).ok());
+        let Some(gw) = gateway else { continue };
+        let egress_ipv4 = nic
+            .ipv4_address
+            .as_ref()
+            .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
+            .filter(|ip| !ip.is_unspecified() && !ip.is_loopback());
+        let entry = MacEntry { if_index: nic.if_index, gateway: gw, egress_ipv4 };
+        mac_map.insert(nic.mac_address.to_ascii_uppercase(), entry.clone());
+        // Insert all name variants (lowercase) so lookups are case-insensitive.
+        nic_map.insert(nic.name.to_ascii_lowercase(), entry.clone());
+        nic_map.insert(nic.display_name.to_ascii_lowercase(), entry.clone());
+        if let Some(ref friendly) = nic.friendly_name {
+            nic_map.insert(friendly.to_ascii_lowercase(), entry.clone());
+        }
+        gw_map.insert(gw, entry);
+    }
+    (mac_map, nic_map, gw_map)
+}
+
+/// Compile routing rules against the current host interfaces.
 pub fn build_compiled_rules(
     config: &crate::config::Config,
 ) -> Result<Vec<crate::config::CompiledRule>> {
     let interfaces = enumerate_interfaces()?;
-    let gateway_index_map = build_routing_gateway_index_map(&interfaces)?;
-    let mut ipv4_by_index = HashMap::new();
-
-    for nic in &interfaces {
-        if let Some(ip) = &nic.ipv4_address {
-            if let Ok(addr) = ip.parse::<Ipv4Addr>() {
-                if !addr.is_unspecified() && !addr.is_loopback() {
-                    ipv4_by_index.insert(nic.if_index, addr);
-                }
-            }
-        }
-    }
-
-    config.compile_rules(&gateway_index_map, &ipv4_by_index)
+    let (mac_map, nic_map, gw_map) = build_adapter_maps(&interfaces);
+    config.compile_rules(&mac_map, &nic_map, &gw_map)
 }
 
 #[cfg(test)]
