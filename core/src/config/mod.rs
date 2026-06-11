@@ -26,6 +26,14 @@ pub struct CompiledRule {
     pub rewrite_to: Option<Ipv4Addr>,
 }
 
+/// Resolved interface info built at startup from live adapter enumeration.
+#[derive(Debug, Clone)]
+pub struct MacEntry {
+    pub if_index: u32,
+    pub gateway: Ipv4Addr,
+    pub egress_ipv4: Option<Ipv4Addr>,
+}
+
 impl CompiledRule {
     /// Return true when this rule's pattern matches the given IPv4 address.
     /// Outbound packets match on destination; inbound packets match on source (remote peer).
@@ -37,56 +45,68 @@ impl CompiledRule {
         }
     }
 }
+
+/// A routing rule as stored in `routes.json`.
+///
+/// Resolution priority at startup: MAC > NIC name > gateway IP.
+/// At least one target field must be set.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoutingRule {
+    #[serde(rename = "ip-or-cidr")]
     pub ip: String,
-    pub gateway: String,
+    #[serde(rename = "route-to-mac-address")]
+    pub mac: Option<String>,
+    #[serde(rename = "route-to-nic-name")]
+    pub nic: Option<String>,
+    #[serde(rename = "route-to-default-gateway")]
+    pub gateway: Option<String>,
     pub rewrite_to: Option<String>,
 }
 
-/// Legacy `routes.json` used `"nic": "Ethernet"`; reject with a clear migration hint.
+/// Input struct for loading `routes.json`; catches deprecated field names with clear hints.
 #[derive(Debug, Deserialize)]
 struct RoutingRuleInput {
+    #[serde(rename = "ip-or-cidr", alias = "ip")]
     ip: String,
-    #[serde(default)]
-    gateway: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "route-to-mac-address", default)]
+    mac: Option<String>,
+    #[serde(rename = "route-to-nic-name", default)]
     nic: Option<String>,
-    rewrite_to: Option<String>,
+    #[serde(rename = "route-to-default-gateway", default)]
+    gateway: Option<String>,
+    pub rewrite_to: Option<String>,
 }
 
 impl RoutingRuleInput {
     fn into_rule(self) -> Result<RoutingRule> {
-        let gateway = self.gateway.unwrap_or_default();
-        if gateway.is_empty() {
-            if let Some(nic) = self.nic.filter(|n| !n.is_empty()) {
-                return Err(anyhow!(
-                    "routing rule {} uses deprecated \"nic\": \"{nic}\". \
-                     Rules now target a default gateway IP. Set \
-                     \"gateway\" to the default gateway IPv4 of the interface you want.",
-                    self.ip
-                ));
-            }
+        if self.mac.is_none() && self.nic.is_none() && self.gateway.is_none() {
             return Err(anyhow!(
-                "routing rule {} is missing \"gateway\" (default gateway IPv4 of the target interface)",
+                "routing rule {} must set at least one of \"route-to-mac-address\", \
+                 \"route-to-nic-name\", or \"route-to-default-gateway\" \
+                 (run `roust gateway list` to see available adapters).",
                 self.ip
             ));
         }
         Ok(RoutingRule {
             ip: self.ip,
-            gateway,
+            mac: self.mac.filter(|m| !m.is_empty()).map(|m| m.to_ascii_uppercase()),
+            nic: self.nic.filter(|n| !n.is_empty()),
+            gateway: self.gateway.filter(|g| !g.is_empty()),
             rewrite_to: self.rewrite_to,
         })
     }
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub rules: Vec<RoutingRule>,
 }
+
 impl Config {
     pub fn new() -> Self {
         Config { rules: vec![] }
     }
+
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         if !path.exists() {
@@ -95,9 +115,13 @@ impl Config {
         let contents = fs::read_to_string(path)?;
         Self::from_json_str(&contents)
     }
+
     pub fn from_json_str(contents: &str) -> Result<Self> {
         let inputs: Vec<RoutingRuleInput> = serde_json::from_str(contents).map_err(|e| {
-            anyhow!("invalid routes JSON (expected [{{\"ip\":\"...\",\"gateway\":\"...\"}}]): {e}")
+            anyhow!(
+                "invalid routes JSON (expected \
+                 [{{\"ip-or-cidr\":\"...\",\"route-to-mac-address\":\"...\"}}]): {e}"
+            )
         })?;
         let rules = inputs
             .into_iter()
@@ -105,6 +129,7 @@ impl Config {
             .collect::<Result<Vec<_>>>()?;
         Ok(Config { rules })
     }
+
     pub fn parse_import_file(contents: &str, path: &Path) -> Result<Vec<RoutingRule>> {
         let is_json = path
             .extension()
@@ -114,12 +139,18 @@ impl Config {
             if let Ok(rules) = serde_json::from_str::<Vec<RoutingRule>>(contents) {
                 return Ok(rules);
             }
-            let ips: Vec<String> = serde_json::from_str(contents).map_err(|e| {                anyhow!(                    "JSON import must be [\"cidr\", ...] or [{{\"ip\":\"...\",\"gateway\":\"...\"}}]: {e}"                )            })?;
+            let ips: Vec<String> = serde_json::from_str(contents).map_err(|e| {
+                anyhow!(
+                    "JSON import must be [\"cidr\", ...] or \
+                     [{{\"ip-or-cidr\":\"...\",\"route-to-mac-address\":\"...\"}}]: {e}"
+                )
+            })?;
             return Ok(ips
                 .into_iter()
                 .map(|ip| RoutingRule {
                     ip,
-                    gateway: String::new(),
+                    mac: None,
+                    gateway: None,
                     rewrite_to: None,
                 })
                 .collect());
@@ -130,11 +161,13 @@ impl Config {
             .filter(|line| !line.is_empty())
             .map(|ip| RoutingRule {
                 ip: ip.to_string(),
-                gateway: String::new(),
+                mac: None,
+                gateway: None,
                 rewrite_to: None,
             })
             .collect())
     }
+
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -144,27 +177,34 @@ impl Config {
         fs::write(path, json)?;
         Ok(())
     }
+
     pub fn add_rule(
         &mut self,
         ip: String,
-        gateway: String,
+        mac: Option<String>,
+        nic: Option<String>,
+        gateway: Option<String>,
         rewrite_to: Option<String>,
     ) -> Result<()> {
         if ip != "*" {
             self.validate_ip_format(&ip)?;
         }
-        gateway
-            .parse::<Ipv4Addr>()
-            .map_err(|e| anyhow!("invalid gateway \"{gateway}\": {e}"))?;
+        let mac = mac.filter(|m| !m.is_empty()).map(|m| m.to_ascii_uppercase());
+        let nic = nic.filter(|n| !n.is_empty());
+        let gateway = gateway.filter(|g| !g.is_empty());
+        if mac.is_none() && nic.is_none() && gateway.is_none() {
+            return Err(anyhow!(
+                "provide at least one of --mac, --nic, or --gateway"
+            ));
+        }
+        if let Some(ref gw) = gateway {
+            gw.parse::<Ipv4Addr>()
+                .map_err(|e| anyhow!("invalid gateway \"{gw}\": {e}"))?;
+        }
         if let Some(ref rewrite) = rewrite_to {
             rewrite.parse::<IpAddr>()?;
         }
-        let rule = RoutingRule {
-            ip,
-            gateway,
-            rewrite_to,
-        };
-        self.rules.push(rule);
+        self.rules.push(RoutingRule { ip, mac, nic, gateway, rewrite_to });
         Ok(())
     }
 
@@ -182,50 +222,83 @@ impl Config {
         ip.parse::<IpAddr>()?;
         Ok(())
     }
-    
+
     pub fn get_rules(&self) -> &[RoutingRule] {
         &self.rules
     }
 
-    /// Build an in-memory routing table: parse each rule once and map default gateway → interface index.
+    /// Build an in-memory routing table.
+    ///
+    /// Resolution priority per rule: MAC > NIC name > gateway IP.
     pub fn compile_rules(
         &self,
-        gateway_index_map: &HashMap<Ipv4Addr, u32>,
-        ipv4_by_index: &HashMap<u32, Ipv4Addr>,
+        mac_map: &HashMap<String, MacEntry>,
+        nic_map: &HashMap<String, MacEntry>,
+        gw_map: &HashMap<Ipv4Addr, MacEntry>,
     ) -> Result<Vec<CompiledRule>> {
         let mut compiled = Vec::with_capacity(self.rules.len());
         for rule in &self.rules {
             let match_pattern = Self::compile_match_pattern(&rule.ip)?;
-            let gateway: Ipv4Addr = rule.gateway.parse().map_err(|e| {
-                anyhow!("routing rule {} has invalid gateway \"{}\": {e}", rule.ip, rule.gateway)
-            })?;
-            let if_index = gateway_index_map.get(&gateway).copied().ok_or_else(|| {
-                anyhow!(
-                    "routing rule {} → gateway {} is not a default gateway on any local interface",
-                    rule.ip,
-                    gateway
-                )
-            })?;
+            let entry = Self::resolve_entry(rule, mac_map, nic_map, gw_map)?;
             let rewrite_to = rule
                 .rewrite_to
                 .as_ref()
                 .map(|s| {
-                    s.parse::<Ipv4Addr>().map_err(|e| {
-                        anyhow!("invalid rewrite_to \"{s}\" on rule {}: {e}", rule.ip)
-                    })
+                    s.parse::<Ipv4Addr>()
+                        .map_err(|e| anyhow!("invalid rewrite_to \"{s}\" on rule {}: {e}", rule.ip))
                 })
                 .transpose()?;
-            let egress_ipv4 = ipv4_by_index.get(&if_index).copied();
             compiled.push(CompiledRule {
                 ip_label: rule.ip.clone(),
-                gateway,
+                gateway: entry.gateway,
                 match_pattern,
-                if_index,
-                egress_ipv4,
+                if_index: entry.if_index,
+                egress_ipv4: entry.egress_ipv4,
                 rewrite_to,
             });
         }
         Ok(compiled)
+    }
+
+    /// Priority: MAC > NIC name > gateway IP.
+    fn resolve_entry<'a>(
+        rule: &RoutingRule,
+        mac_map: &'a HashMap<String, MacEntry>,
+        nic_map: &'a HashMap<String, MacEntry>,
+        gw_map: &'a HashMap<Ipv4Addr, MacEntry>,
+    ) -> Result<&'a MacEntry> {
+        if let Some(mac) = &rule.mac {
+            return mac_map.get(&mac.to_ascii_uppercase()).ok_or_else(|| {
+                anyhow!(
+                    "routing rule {} → MAC {} not found on any local interface",
+                    rule.ip, mac
+                )
+            });
+        }
+        if let Some(nic) = &rule.nic {
+            return nic_map.get(&nic.to_ascii_lowercase()).ok_or_else(|| {
+                anyhow!(
+                    "routing rule {} → NIC name \"{}\" not found on any local interface",
+                    rule.ip, nic
+                )
+            });
+        }
+        if let Some(gw_str) = &rule.gateway {
+            let gw: Ipv4Addr = gw_str.parse().map_err(|e| {
+                anyhow!("routing rule {} has invalid gateway \"{gw_str}\": {e}", rule.ip)
+            })?;
+            return gw_map.get(&gw).ok_or_else(|| {
+                anyhow!(
+                    "routing rule {} → gateway {} is not a default gateway on any local interface",
+                    rule.ip, gw_str
+                )
+            });
+        }
+        Err(anyhow!(
+            "routing rule {} has none of route-to-mac-address, route-to-nic-name, \
+             or route-to-default-gateway",
+            rule.ip
+        ))
     }
 
     /// Look up the first matching compiled rule for a destination IPv4 (in-memory only).
@@ -265,69 +338,151 @@ impl Config {
         PathBuf::from("routes.json")
     }
 }
+
 impl Default for Config {
     fn default() -> Self {
         Config::new()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_reject_deprecated_nic_field() {
-        let json = r#"[{"ip":"10.0.0.0/8","nic":"Ethernet"}]"#;
+        let json = r#"[{"ip-or-cidr":"10.0.0.0/8","nic":"Ethernet"}]"#;
         let err = Config::from_json_str(json).unwrap_err();
         assert!(err.to_string().contains("deprecated"));
-        assert!(err.to_string().contains("gateway"));
     }
 
     #[test]
-    fn test_load_routes_json_array_format() {
-        let json = r#"[            {"ip": "10.0.0.0/8", "gateway": "192.168.1.1"},            {"ip": "192.168.0.0/16", "gateway": "10.0.0.1"}        ]"#;
+    fn test_reject_rule_with_neither_mac_nor_gateway() {
+        let json = r#"[{"ip-or-cidr":"10.0.0.0/8"}]"#;
+        let err = Config::from_json_str(json).unwrap_err();
+        assert!(err.to_string().contains("route-to-mac-address"));
+        assert!(err.to_string().contains("route-to-default-gateway"));
+    }
+
+    #[test]
+    fn test_load_mac_only_rule() {
+        let json = r#"[
+            {"ip-or-cidr": "10.0.0.0/8", "route-to-mac-address": "AA:BB:CC:DD:EE:FF"}
+        ]"#;
         let config = Config::from_json_str(json).unwrap();
-        assert_eq!(config.rules.len(), 2);
-        assert_eq!(config.rules[0].ip, "10.0.0.0/8");
-        assert_eq!(config.rules[0].gateway, "192.168.1.1");
+        assert_eq!(config.rules[0].mac.as_deref(), Some("AA:BB:CC:DD:EE:FF"));
+        assert!(config.rules[0].nic.is_none());
+        assert!(config.rules[0].gateway.is_none());
     }
+
     #[test]
-    fn test_parse_import_routes_objects() {
-        let json = r#"[{"ip":"172.16.0.0/12","gateway":"192.168.1.1"}]"#;
-        let rules = Config::parse_import_file(json, Path::new("routes.json")).unwrap();
-        assert_eq!(rules[0].gateway, "192.168.1.1");
+    fn test_load_nic_only_rule() {
+        let json = r#"[
+            {"ip-or-cidr": "10.0.0.0/8", "route-to-nic-name": "Wi-Fi"}
+        ]"#;
+        let config = Config::from_json_str(json).unwrap();
+        assert!(config.rules[0].mac.is_none());
+        assert_eq!(config.rules[0].nic.as_deref(), Some("Wi-Fi"));
+        assert!(config.rules[0].gateway.is_none());
     }
+
     #[test]
-    fn test_parse_import_cidr_string_array() {
-        let json = r#"["10.0.0.0/8"]"#;
-        let rules = Config::parse_import_file(json, Path::new("list.json")).unwrap();
-        assert_eq!(rules[0].ip, "10.0.0.0/8");
-        assert!(rules[0].gateway.is_empty());
+    fn test_load_gateway_only_rule() {
+        let json = r#"[
+            {"ip-or-cidr": "10.0.0.0/8", "route-to-default-gateway": "192.168.1.1"}
+        ]"#;
+        let config = Config::from_json_str(json).unwrap();
+        assert!(config.rules[0].mac.is_none());
+        assert!(config.rules[0].nic.is_none());
+        assert_eq!(config.rules[0].gateway.as_deref(), Some("192.168.1.1"));
     }
+
     #[test]
-    fn test_compile_rules_resolves_if_index() {
+    fn test_load_all_three_fields() {
+        let json = r#"[
+            {
+                "ip-or-cidr": "10.0.0.0/8",
+                "route-to-mac-address": "AA:BB:CC:DD:EE:FF",
+                "route-to-nic-name": "Ethernet",
+                "route-to-default-gateway": "192.168.1.1"
+            }
+        ]"#;
+        let config = Config::from_json_str(json).unwrap();
+        assert_eq!(config.rules[0].mac.as_deref(), Some("AA:BB:CC:DD:EE:FF"));
+        assert_eq!(config.rules[0].nic.as_deref(), Some("Ethernet"));
+        assert_eq!(config.rules[0].gateway.as_deref(), Some("192.168.1.1"));
+    }
+
+    fn make_entry(if_index: u32, gw: Ipv4Addr) -> MacEntry {
+        MacEntry { if_index, gateway: gw, egress_ipv4: None }
+    }
+
+    #[test]
+    fn test_compile_mac_wins_over_nic_and_gateway() {
         let mut config = Config::new();
         config
-            .add_rule("10.0.0.0/8".to_string(), "192.168.1.1".to_string(), None)
+            .add_rule(
+                "10.0.0.0/8".to_string(),
+                Some("AA:BB:CC:DD:EE:FF".to_string()),
+                Some("Wi-Fi".to_string()),
+                Some("192.168.1.1".to_string()),
+                None,
+            )
             .unwrap();
-        let mut gateway_map = HashMap::new();
-        gateway_map.insert(Ipv4Addr::new(192, 168, 1, 1), 42);
-        let compiled = config.compile_rules(&gateway_map, &HashMap::new()).unwrap();
+        let mut mac_map = HashMap::new();
+        mac_map.insert("AA:BB:CC:DD:EE:FF".to_string(), make_entry(42, Ipv4Addr::new(10, 0, 0, 1)));
+        let mut nic_map = HashMap::new();
+        nic_map.insert("wi-fi".to_string(), make_entry(3, Ipv4Addr::new(10, 0, 0, 1)));
+        let mut gw_map = HashMap::new();
+        gw_map.insert(Ipv4Addr::new(192, 168, 1, 1), make_entry(7, Ipv4Addr::new(192, 168, 1, 1)));
+        let compiled = config.compile_rules(&mac_map, &nic_map, &gw_map).unwrap();
         assert_eq!(compiled[0].if_index, 42);
-        assert_eq!(compiled[0].gateway, Ipv4Addr::new(192, 168, 1, 1));
-        assert!(compiled[0].matches(Ipv4Addr::new(10, 1, 2, 3)));
+    }
+
+    #[test]
+    fn test_compile_nic_wins_over_gateway() {
+        let mut config = Config::new();
+        config
+            .add_rule(
+                "10.0.0.0/8".to_string(),
+                None,
+                Some("Ethernet".to_string()),
+                Some("192.168.1.1".to_string()),
+                None,
+            )
+            .unwrap();
+        let mac_map = HashMap::new();
+        let mut nic_map = HashMap::new();
+        nic_map.insert("ethernet".to_string(), make_entry(9, Ipv4Addr::new(10, 0, 0, 1)));
+        let mut gw_map = HashMap::new();
+        gw_map.insert(Ipv4Addr::new(192, 168, 1, 1), make_entry(7, Ipv4Addr::new(192, 168, 1, 1)));
+        let compiled = config.compile_rules(&mac_map, &nic_map, &gw_map).unwrap();
+        assert_eq!(compiled[0].if_index, 9);
+    }
+
+    #[test]
+    fn test_compile_gateway_fallback() {
+        let mut config = Config::new();
+        config
+            .add_rule("10.0.0.0/8".to_string(), None, None, Some("192.168.1.1".to_string()), None)
+            .unwrap();
+        let mut gw_map = HashMap::new();
+        gw_map.insert(Ipv4Addr::new(192, 168, 1, 1), make_entry(5, Ipv4Addr::new(192, 168, 1, 1)));
+        let compiled = config.compile_rules(&HashMap::new(), &HashMap::new(), &gw_map).unwrap();
+        assert_eq!(compiled[0].if_index, 5);
     }
 
     #[test]
     fn test_find_compiled() {
         let mut config = Config::new();
         config
-            .add_rule("192.168.1.0/24".to_string(), "10.0.0.1".to_string(), None)
+            .add_rule("192.168.1.0/24".to_string(), Some("AA:BB:CC:DD:EE:01".to_string()), None, None, None)
             .unwrap();
-        let mut gateway_map = HashMap::new();
-        gateway_map.insert(Ipv4Addr::new(10, 0, 0, 1), 1);
-        let compiled = config.compile_rules(&gateway_map, &HashMap::new()).unwrap();
+        let mut mac_map = HashMap::new();
+        mac_map.insert("AA:BB:CC:DD:EE:01".to_string(), make_entry(1, Ipv4Addr::new(10, 0, 0, 1)));
+        let compiled = config.compile_rules(&mac_map, &HashMap::new(), &HashMap::new()).unwrap();
         let hit = Config::find_compiled(&compiled, Ipv4Addr::new(192, 168, 1, 50));
         assert!(hit.is_some());
         assert_eq!(hit.unwrap().if_index, 1);
     }
-
 }

@@ -178,11 +178,11 @@ fn handle_gateway_command(action: GatewayCommands) -> Result<()> {
 
             }
 
-            println!("{:<32} {}", "nic-name", "gateway-ip");
+            println!("{:<32} {:<20} {}", "nic-name", "mac", "gateway-ip");
 
             for row in rows {
 
-                println!("{:<32} {}", row.nic_name, row.gateway_ip);
+                println!("{:<32} {:<20} {}", row.nic_name, row.mac, row.gateway_ip);
 
             }
 
@@ -224,23 +224,29 @@ fn handle_rule_command(action: RuleCommands, config_path: &PathBuf) -> Result<()
 
             println!(
 
-                "\n{:<24} {:<18} {:<18}",
+                "\n{:<24} {:<20} {:<18} {:<18} {:<18}",
 
-                "IP / CIDR", "Gateway", "rewrite_to"
+                "IP / CIDR", "MAC", "NIC", "Gateway", "rewrite_to"
 
             );
 
-            println!("{}", "-".repeat(64));
+            println!("{}", "-".repeat(102));
 
             for rule in rules {
+
+                let mac = rule.mac.as_deref().unwrap_or("-");
+
+                let nic = rule.nic.as_deref().unwrap_or("-");
+
+                let gw = rule.gateway.as_deref().unwrap_or("-");
 
                 let rewrite = rule.rewrite_to.as_deref().unwrap_or("-");
 
                 println!(
 
-                    "{:<24} {:<18} {:<18}",
+                    "{:<24} {:<20} {:<18} {:<18} {:<18}",
 
-                    rule.ip, rule.gateway, rewrite
+                    rule.ip, mac, nic, gw, rewrite
 
                 );
 
@@ -276,6 +282,10 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
         ip,
 
+        mac,
+
+        nic,
+
         gateway,
 
         file,
@@ -288,13 +298,13 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
     if let Some(file_path) = file {
 
-        let result = api::import_rules_from_file(config_path, &file_path, gateway, rewrite_to)?;
+        let result = api::import_rules_from_file(config_path, &file_path, mac, nic, gateway, rewrite_to)?;
 
         print_mutation_result(result);
 
-    } else if let (Some(ip_addr), Some(dest)) = (ip, gateway) {
+    } else if let Some(ip_addr) = ip {
 
-        let result = api::add_rule(config_path, ip_addr, dest, rewrite_to)?;
+        let result = api::add_rule(config_path, ip_addr, mac, nic, gateway, rewrite_to)?;
 
         print_mutation_result(result);
 
@@ -302,7 +312,8 @@ fn handle_add_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
         return Err(anyhow!(
 
-            "Provide --ip and --gateway, or --file (e.g. routes.json with ip and gateway per entry)"
+            "Provide --ip with at least one of --mac, --nic, --gateway, or --file. \
+             Run `roust gateway list` to see adapters."
 
         ));
 
@@ -338,6 +349,10 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
         ip,
 
+        mac,
+
+        nic,
+
         gateway,
 
         rewrite_to,
@@ -346,9 +361,9 @@ fn handle_edit_rule(action: RuleAction, config_path: &PathBuf) -> Result<()> {
 
     } = action;
 
-    if let (Some(ip_addr), Some(new_gateway)) = (ip, gateway) {
+    if let Some(ip_addr) = ip {
 
-        let result = api::edit_rule(config_path, ip_addr, new_gateway, rewrite_to)?;
+        let result = api::edit_rule(config_path, ip_addr, mac, nic, gateway, rewrite_to)?;
 
         print_mutation_result(result);
 

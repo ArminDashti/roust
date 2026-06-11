@@ -38,10 +38,12 @@ fn predict_ip(ip: String) -> Result<api::PredictResult, String> {
 #[tauri::command]
 fn add_rule(
     ip: String,
-    gateway: String,
+    mac: Option<String>,
+    nic: Option<String>,
+    gateway: Option<String>,
     rewrite_to: Option<String>,
 ) -> Result<api::RuleMutationResult, String> {
-    map_err(api::add_rule(&config_path(), ip, gateway, rewrite_to))
+    map_err(api::add_rule(&config_path(), ip, mac, nic, gateway, rewrite_to))
 }
 
 #[tauri::command]
@@ -52,21 +54,27 @@ fn delete_rule(ip: String) -> Result<api::RuleMutationResult, String> {
 #[tauri::command]
 fn edit_rule(
     ip: String,
-    gateway: String,
+    mac: Option<String>,
+    nic: Option<String>,
+    gateway: Option<String>,
     rewrite_to: Option<String>,
 ) -> Result<api::RuleMutationResult, String> {
-    map_err(api::edit_rule(&config_path(), ip, gateway, rewrite_to))
+    map_err(api::edit_rule(&config_path(), ip, mac, nic, gateway, rewrite_to))
 }
 
 #[tauri::command]
 fn import_rules(
     file_path: String,
+    default_mac: Option<String>,
+    default_nic: Option<String>,
     default_gateway: Option<String>,
     rewrite_to: Option<String>,
 ) -> Result<api::RuleMutationResult, String> {
     map_err(api::import_rules_from_file(
         &config_path(),
         Path::new(&file_path),
+        default_mac,
+        default_nic,
         default_gateway,
         rewrite_to,
     ))
