@@ -255,7 +255,7 @@ pub fn install(auto_start: bool) -> Result<()> {
         exe_path.display(),
         RUN_AS_SERVICE_FLAG
     );
-    println!("  Start:  roust start");
+    println!("  Start the service from the Roust app.");
     Ok(())
 }
 
@@ -313,7 +313,7 @@ fn terminate_process(pid: u32) {
         .output();
 }
 
-/// Kill every `roust.exe` except this CLI process (orphaned foreground routers, stuck service).
+/// Kill every `roust.exe` except this process (orphaned routers, stuck service).
 fn kill_other_roust_processes() {
     let self_pid = std::process::id();
     let script = format!(
@@ -410,7 +410,7 @@ pub fn stop() -> Result<()> {
 pub fn restart() -> Result<()> {
     if !is_installed()? {
         return Err(anyhow!(
-            "Windows service \"{SERVICE_NAME}\" is not installed. Run `roust service install` as Administrator."
+            "Windows service \"{SERVICE_NAME}\" is not installed. Re-run installer.ps1 as Administrator or run `roust --install-service`."
         ));
     }
 
@@ -444,22 +444,4 @@ pub fn is_active() -> Result<bool> {
         return Ok(false);
     }
     Ok(matches!(query_state()?, ServiceState::Running))
-}
-
-pub fn print_status() -> Result<()> {
-    let dir = exe_install_dir()?;
-    let state_label = if is_installed()? {
-        let state = query_state()?;
-        if service_is_active(state) {
-            "started"
-        } else {
-            "stopped"
-        }
-    } else {
-        "stopped"
-    };
-    println!("{state_label} roust");
-    println!("directory: {}", dir.display());
-    println!("version: {}", env!("CARGO_PKG_VERSION"));
-    Ok(())
 }

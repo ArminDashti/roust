@@ -72,8 +72,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>IP / CIDR</th>
-                  <th>Gateway</th>
+                  <th>CIDR</th>
                   <th>Rewrite To</th>
                   <th></th>
                 </tr>
@@ -126,17 +125,15 @@
         <p id="import-file-label" class="path-line"></p>
         <p class="hint">
           Accepts a JSON array of rule objects or CIDR strings. CIDR-only lists need a default
-          gateway.
+          rewrite target.
         </p>
         <label>
-          Default Gateway <span class="muted">(for CIDR-only lists)</span>
-          <select id="import-gateway" name="default_gateway">
-            <option value="">— Select if needed —</option>
-          </select>
-        </label>
-        <label>
-          Rewrite To <span class="muted">(optional, applies to all imported rules)</span>
-          <input id="import-rewrite" name="rewrite_to" placeholder="Leave empty to skip" />
+          Default Rewrite To <span class="muted">(for CIDR-only lists)</span>
+          <input
+            id="import-rewrite"
+            name="default_rewrite_to"
+            placeholder="MAC address, NIC name, or gateway IP"
+          />
         </label>
         <footer>
           <button type="button" id="import-cancel" class="btn">Cancel</button>
@@ -151,16 +148,17 @@
           <h3 id="rule-dialog-title">Add Rule</h3>
         </header>
         <label>
-          IP / CIDR
-          <input id="rule-ip" name="ip" required placeholder="10.0.0.0/8" />
+          CIDR
+          <input id="rule-cidr" name="cidr" required placeholder="10.0.0.0/8" />
         </label>
         <label>
-          Gateway
-          <input id="rule-gateway" name="gateway" required placeholder="192.168.1.1" />
-        </label>
-        <label>
-          Rewrite To <span class="muted">(optional)</span>
-          <input id="rule-rewrite" name="rewrite_to" placeholder="Leave empty to skip" />
+          Rewrite To
+          <input
+            id="rule-rewrite"
+            name="rewrite_to"
+            required
+            placeholder="MAC address, NIC name, or gateway IP"
+          />
         </label>
         <footer>
           <button type="button" id="rule-cancel" class="btn">Cancel</button>

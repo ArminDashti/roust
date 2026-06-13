@@ -16,7 +16,7 @@ name = "roust-setup"
 path = "src/bin/roust-setup.rs"
 
 [dependencies]
-# CLI and argument parsing
+# Argument parsing for roust-setup
 # Pin below 4.6 so clap_derive does not require Cargo's unstable edition2024.
 clap = { version = "=4.5.27", features = ["derive"] }
 

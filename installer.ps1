@@ -86,22 +86,12 @@ function Stop-RoustService {
         return
     }
 
-    $stopExe = $null
-    if (Test-Path -LiteralPath $InstallExe) {
-        $stopExe = $InstallExe
-    }
-    else {
-        $cmd = Get-Command -Name 'roust' -ErrorAction SilentlyContinue
-        if ($cmd) { $stopExe = $cmd.Source }
-    }
-    if ($stopExe) {
-        Write-Step 'Stopping Windows service via roust stop...'
-        & $stopExe stop 2>&1 | ForEach-Object { Write-Host $_ }
-    }
+    Write-Step 'No Roust Windows service registered; stopping roust processes before install...'
+    Stop-RoustProcesses
 }
 
 function Stop-RoustProcesses {
-    # Stop any running roust CLI or router process so files can be replaced.
+    # Stop any running roust process so files can be replaced.
     $names = @('roust')
     foreach ($name in $names) {
         $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
@@ -270,9 +260,10 @@ if ($LASTEXITCODE -ne 0) {
     Write-Warning 'Service install failed. Run manually as Administrator: roust --install-service'
 } else {
     Write-Step 'Starting Windows service...'
-    & $InstallExe start 2>&1 | ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning 'Service start failed. After fixing config, run: roust start'
+    try {
+        Start-Service -Name 'Roust' -ErrorAction Stop
+    } catch {
+        Write-Warning 'Service start failed. After fixing config, start it from the Roust app or run: Start-Service Roust'
     }
 }
 
@@ -280,6 +271,6 @@ Write-Host ''
 Write-Host 'Install finished.'
 Write-Host "  Binary:  $InstallExe"
 Write-Host "  Routes:  $InstallRoutes"
-Write-Host '  Service: roust status   (Windows service name: Roust)'
+Write-Host '  Service: Start-Service Roust   (Windows service name: Roust)'
 Write-Host '  Logs:    logs\roust-service.log under the install folder'
 Write-Host '  Open a new PowerShell window if `roust` is not found yet.'
