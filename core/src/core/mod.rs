@@ -145,14 +145,14 @@ impl PacketRouter {
             match rule.egress_ipv4 {
                 Some(egress) => log::info!(
                     "  {} → gateway {} (if_index={}, egress_src={})",
-                    rule.ip_label,
+                    rule.cidr_label,
                     rule.gateway,
                     rule.if_index,
                     egress
                 ),
                 None => log::info!(
                     "  {} → gateway {} (if_index={})",
-                    rule.ip_label,
+                    rule.cidr_label,
                     rule.gateway,
                     rule.if_index
                 ),
@@ -230,52 +230,26 @@ impl PacketRouter {
 
     /// Apply routing rules to one IPv4 packet. Returns true when a rule matched and changed metadata/header.
     fn apply_rules(
-        packet: &mut [u8],
-        addr: &mut WinDivertAddress,
+        _packet: &mut [u8],
+        _addr: &mut WinDivertAddress,
         compiled_rules: &[CompiledRule],
         outbound: bool,
     ) -> bool {
         let match_ip = if outbound {
-            Self::extract_dst_ipv4(packet)
+            Self::extract_dst_ipv4(_packet)
         } else {
-            Self::extract_src_ipv4(packet)
+            Self::extract_src_ipv4(_packet)
         };
         let Some(match_ip) = match_ip else {
             return false;
         };
 
-        let Some(rule) = Config::find_compiled(compiled_rules, match_ip) else {
+        let Some(_rule) = Config::find_compiled(compiled_rules, match_ip) else {
             return false;
         };
 
         // Egress selection is handled via kernel routes installed at startup.
-        // WinDivert ignores outbound IfIdx; only apply packet edits for rewrite_to.
-        let Some(new_ip) = rule.rewrite_to else {
-            return false;
-        };
-
-        let direction = if outbound { "outbound" } else { "inbound" };
-        log::debug!(
-            "{direction} {} rewrite via gateway {} (if_idx={})",
-            match_ip,
-            rule.gateway,
-            rule.if_index
-        );
-
-        let header_changed = if outbound {
-            Self::rewrite_dst_ipv4(packet, new_ip)
-        } else {
-            Self::rewrite_src_ipv4(packet, new_ip)
-        };
-
-        if header_changed {
-            addr.invalidate_checksum_flags();
-            if let Err(e) = safe::calc_checksums(packet, addr) {
-                log::warn!("WinDivertHelperCalcChecksums failed: {e}");
-            }
-        }
-
-        true
+        false
     }
 
     fn ipv4_header_len(packet: &[u8]) -> Option<usize> {
@@ -369,14 +343,14 @@ fn reload_config_from_disk(
         match rule.egress_ipv4 {
             Some(egress) => log::info!(
                 "  {} → gateway {} (if_index={}, egress_src={})",
-                rule.ip_label,
+                rule.cidr_label,
                 rule.gateway,
                 rule.if_index,
                 egress
             ),
             None => log::info!(
                 "  {} → gateway {} (if_index={})",
-                rule.ip_label,
+                rule.cidr_label,
                 rule.gateway,
                 rule.if_index
             ),
@@ -415,12 +389,13 @@ mod tests {
         let mut pkt = sample_ipv4_packet([10, 138, 172, 26], [212, 80, 19, 12]);
         let mut addr = WinDivertAddress::zeroed();
         let rules = vec![CompiledRule {
-            ip_label: "212.80.19.12".to_string(),
+            cidr_label: "212.80.19.12/32".to_string(),
             gateway: Ipv4Addr::new(192, 168, 1, 1),
-            match_pattern: crate::config::IpMatch::Exact(Ipv4Addr::new(212, 80, 19, 12)),
+            match_pattern: crate::config::IpMatch::Network(
+                "212.80.19.12/32".parse().unwrap(),
+            ),
             if_index: 21,
             egress_ipv4: Some(Ipv4Addr::new(192, 168, 1, 101)),
-            rewrite_to: None,
         }];
         assert!(!PacketRouter::apply_rules(&mut pkt, &mut addr, &rules, true));
         assert_eq!(

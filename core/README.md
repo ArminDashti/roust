@@ -1,8 +1,8 @@
 # roust
 
-Windows packet router with rule-based routing by interface default gateway for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (CLI) and `roust-setup.exe` (first-run setup).
+Windows packet router with rule-based routing by interface default gateway for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (Windows service daemon) and `roust-setup.exe` (first-run setup CLI). Manage rules and service state with the **Roust** desktop app (Tauri GUI in `gui/`).
 
-**Technical overview:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — architecture, packet flow, config, CLI, and setup.
+**Technical overview:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — architecture, packet flow, config, GUI API, and setup.
 
 ## Install (Windows)
 
@@ -10,22 +10,9 @@ Windows packet router with rule-based routing by interface default gateway for i
 
 1. Download **roust-setup-0.1.0-x64.exe** from the latest [GitHub Actions](https://github.com/ArminDashti/roust/actions) Windows build (artifact `roust-installer-x86_64`).
 2. Run the installer (administrator rights are required for WinDivert).
-3. Open a **new** PowerShell window and run:
+3. Open the **Roust** app to add rules, predict egress, and start or stop the Windows service.
 
-```powershell
-roust --help
-roust rule list
-```
-
-The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Iran/private IP lists, adds that folder to your **user** PATH, and registers a **Windows service** so the router runs in the background.
-
-After install (elevated PowerShell):
-
-```powershell
-roust start             # start the Windows service
-roust status            # check service state
-roust stop              # stop the service
-```
+The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Iran/private IP lists, adds that folder to your **user** PATH, and registers a **Windows service** so the router can run in the background.
 
 Service logs: `logs\roust-service.log` in the install directory.
 
@@ -41,16 +28,13 @@ cargo build --release --bins
 
 Optional flags: `--dir <folder>`, `--install-rust` (downloads rustup only when needed), `--skip-lists`, `--skip-windivert`, `--skip-path`.
 
-To build the wizard locally on Windows:
+Register the service after install (elevated PowerShell):
 
 ```powershell
-cd core
-cargo build --release --bins
-.\installer\stage.ps1
-# Install Inno Setup 6, then:
-iscc installer\roust.iss
-# Output: core\installer\output\roust-setup-0.1.0-x64.exe
+.\target\release\roust.exe --install-service
 ```
+
+Use the Roust app or `installer.ps1` for day-to-day rule and service management.
 
 ## Uninstall
 
@@ -81,7 +65,7 @@ cargo build --release --bins
 
 Artifacts:
 
-- `core/target/release/roust.exe` — main CLI
+- `core/target/release/roust.exe` — Windows service daemon (SCM + packet router)
 - `core/target/release/roust-setup.exe` — downloads WinDivert beside the install if missing and can help with PATH setup
 
 Debug builds use the same paths under `target/debug/`.

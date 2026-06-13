@@ -9,9 +9,8 @@ type ServiceStatus = {
 };
 
 type RoutingRule = {
-  ip: string;
-  gateway: string;
-  rewrite_to: string | null;
+  cidr: string;
+  "rewrite-to": string;
 };
 
 type GatewayRow = {
@@ -42,7 +41,7 @@ const viewTitle: Record<ViewId, string> = {
   predict: "Route Predict",
 };
 
-let editingRuleIp: string | null = null;
+let editingRuleCidr: string | null = null;
 let pendingImportPath: string | null = null;
 
 const toastEl = document.getElementById("toast")!;
@@ -61,13 +60,11 @@ const predictResult = document.getElementById("predict-result")!;
 const ruleDialog = document.getElementById("rule-dialog") as HTMLDialogElement;
 const ruleForm = document.getElementById("rule-form") as HTMLFormElement;
 const ruleDialogTitle = document.getElementById("rule-dialog-title")!;
-const ruleIpInput = document.getElementById("rule-ip") as HTMLInputElement;
-const ruleGatewayInput = document.getElementById("rule-gateway") as HTMLInputElement;
+const ruleCidrInput = document.getElementById("rule-cidr") as HTMLInputElement;
 const ruleRewriteInput = document.getElementById("rule-rewrite") as HTMLInputElement;
 const importDialog = document.getElementById("import-dialog") as HTMLDialogElement;
 const importForm = document.getElementById("import-form") as HTMLFormElement;
 const importFileLabel = document.getElementById("import-file-label")!;
-const importGatewaySelect = document.getElementById("import-gateway") as HTMLSelectElement;
 const importRewriteInput = document.getElementById("import-rewrite") as HTMLInputElement;
 
 function showToast(message: string, isError = false) {
@@ -132,9 +129,8 @@ async function loadRules() {
   for (const rule of rules) {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td><code>${escapeHtml(rule.ip)}</code></td>
-      <td><code>${escapeHtml(rule.gateway)}</code></td>
-      <td>${rule.rewrite_to ? `<code>${escapeHtml(rule.rewrite_to)}</code>` : "—"}</td>
+      <td><code>${escapeHtml(rule.cidr)}</code></td>
+      <td><code>${escapeHtml(rule["rewrite-to"])}</code></td>
       <td class="actions">
         <button type="button" class="btn btn-ghost btn-sm" data-action="edit">Edit</button>
         <button type="button" class="btn btn-ghost btn-sm danger" data-action="delete">Delete</button>
@@ -145,8 +141,8 @@ async function loadRules() {
       openRuleDialog(rule);
     });
     row.querySelector('[data-action="delete"]')?.addEventListener("click", async () => {
-      if (!confirm(`Delete rule for ${rule.ip}?`)) return;
-      const result = await invokeOrToast<RuleMutationResult>("delete_rule", { ip: rule.ip });
+      if (!confirm(`Delete rule for ${rule.cidr}?`)) return;
+      const result = await invokeOrToast<RuleMutationResult>("delete_rule", { cidr: rule.cidr });
       if (result) {
         showToast(result.message + (result.live_apply_hint ? ` ${result.live_apply_hint}` : ""));
         await refreshAll();
@@ -176,38 +172,18 @@ async function loadGateways() {
 }
 
 function openRuleDialog(rule?: RoutingRule) {
-  editingRuleIp = rule?.ip ?? null;
+  editingRuleCidr = rule?.cidr ?? null;
   ruleDialogTitle.textContent = rule ? "Edit Rule" : "Add Rule";
-  ruleIpInput.value = rule?.ip ?? "";
-  ruleIpInput.readOnly = Boolean(rule);
-  ruleGatewayInput.value = rule?.gateway ?? "";
-  ruleRewriteInput.value = rule?.rewrite_to ?? "";
+  ruleCidrInput.value = rule?.cidr ?? "";
+  ruleCidrInput.readOnly = Boolean(rule);
+  ruleRewriteInput.value = rule?.["rewrite-to"] ?? "";
   ruleDialog.showModal();
-}
-
-async function populateImportGatewaySelect() {
-  const gateways = await invokeOrToast<GatewayRow[]>("list_gateways");
-  importGatewaySelect.replaceChildren();
-
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "— Select if needed —";
-  importGatewaySelect.append(placeholder);
-
-  for (const gw of gateways ?? []) {
-    const option = document.createElement("option");
-    option.value = gw.gateway_ip;
-    option.textContent = `${gw.gateway_ip} (${gw.nic_name})`;
-    importGatewaySelect.append(option);
-  }
 }
 
 async function openImportDialog(filePath: string) {
   pendingImportPath = filePath;
   importFileLabel.textContent = filePath;
   importRewriteInput.value = "";
-  await populateImportGatewaySelect();
-  importGatewaySelect.value = "";
   importDialog.showModal();
 }
 
@@ -285,15 +261,12 @@ importForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!pendingImportPath) return;
 
-  const defaultGatewayRaw = importGatewaySelect.value.trim();
-  const default_gateway = defaultGatewayRaw.length > 0 ? defaultGatewayRaw : null;
-  const rewriteRaw = importRewriteInput.value.trim();
-  const rewrite_to = rewriteRaw.length > 0 ? rewriteRaw : null;
+  const defaultRewriteRaw = importRewriteInput.value.trim();
+  const default_rewrite_to = defaultRewriteRaw.length > 0 ? defaultRewriteRaw : null;
 
   const result = await invokeOrToast<RuleMutationResult>("import_rules", {
     file_path: pendingImportPath,
-    default_gateway,
-    rewrite_to,
+    default_rewrite_to,
   });
 
   if (result) {
@@ -310,14 +283,12 @@ document.getElementById("rule-cancel")?.addEventListener("click", () => {
 
 ruleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const ip = ruleIpInput.value.trim();
-  const gateway = ruleGatewayInput.value.trim();
-  const rewriteRaw = ruleRewriteInput.value.trim();
-  const rewrite_to = rewriteRaw.length > 0 ? rewriteRaw : null;
+  const cidr = ruleCidrInput.value.trim();
+  const rewrite_to = ruleRewriteInput.value.trim();
 
-  const result = editingRuleIp
-    ? await invokeOrToast<RuleMutationResult>("edit_rule", { ip, gateway, rewrite_to })
-    : await invokeOrToast<RuleMutationResult>("add_rule", { ip, gateway, rewrite_to });
+  const result = editingRuleCidr
+    ? await invokeOrToast<RuleMutationResult>("edit_rule", { cidr, rewrite_to })
+    : await invokeOrToast<RuleMutationResult>("add_rule", { cidr, rewrite_to });
 
   if (result) {
     showToast(result.message + (result.live_apply_hint ? ` ${result.live_apply_hint}` : ""));

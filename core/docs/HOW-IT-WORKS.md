@@ -1,10 +1,10 @@
 # How roust works
 
-Technical overview of **roust** — a Windows-only CLI that routes inbound and outbound IPv4 traffic to specific network interfaces using rule-based configuration and [WinDivert](https://www.reqrypt.org/windivert.html) packet interception.
+Technical overview of **roust** — a Windows-only packet router that steers inbound and outbound IPv4 traffic to specific network interfaces using rule-based configuration and [WinDivert](https://www.reqrypt.org/windivert.html) packet interception. Rules and service state are managed through the **Roust** desktop app (Tauri GUI); `roust.exe` runs as a Windows service.
 
 ## Purpose
 
-roust lets you send traffic destined for certain IP addresses (or CIDR ranges) out through a chosen NIC (Ethernet, Wi‑Fi, VPN adapter, etc.), optionally rewriting the packet’s destination IPv4 address before reinjection. Typical use cases include split routing (e.g. Iran or private IP blocks via one interface, everything else via another) without changing the Windows routing table for every prefix.
+roust lets you send traffic destined for certain IPv4 CIDR ranges out through a chosen NIC (Ethernet, Wi‑Fi, VPN adapter, etc.), optionally rewriting the packet’s destination IPv4 address before reinjection. Typical use cases include split routing (e.g. Iran or private IP blocks via one interface, everything else via another) without changing the Windows routing table for every prefix.
 
 The tool does **not** replace the full TCP/IP stack. It sits in user space, captures **inbound and outbound** IPv4 packets with WinDivert, adjusts metadata (and optionally headers), and reinjects them so the kernel delivers or sends them on the interface you configured.
 
@@ -12,20 +12,22 @@ The tool does **not** replace the full TCP/IP stack. It sits in user space, capt
 
 ```mermaid
 flowchart TB
-    subgraph CLI["roust.exe (main binary)"]
-        Parse[CLI parser - clap]
-        ConfigIO[Config load/save - JSON]
-        RuleList[rule list]
-        PredictCmd[predict --ip]
-        RuleCmd[add / delete / edit rules]
-        Start[roust start]
+    subgraph GUI["Roust app (Tauri)"]
+        UI[Desktop UI]
+        TauriCmd[Tauri commands]
     end
 
-    subgraph Core["Packet engine"]
-        Router[PacketRouter]
-        Match[Rule matching - IP/CIDR/*]
-        GwMap[default gateway → if_index map]
-        WinDiv[WinDivert recv/send loop]
+    subgraph CoreLib["roust library"]
+        API[api/ — rules, predict, service control]
+        ConfigIO[config/ — routes.json]
+        Svc[service/ — SCM integration]
+        Router[core/ — PacketRouter]
+        Net[network/ — adapters, GetBestRoute]
+    end
+
+    subgraph Binaries["Executables"]
+        RoustExe[roust.exe — service daemon]
+        SetupExe[roust-setup.exe — post-install CLI]
     end
 
     subgraph OS["Windows"]
@@ -34,29 +36,28 @@ flowchart TB
         Driver[WinDivert.sys driver]
     end
 
-    Parse --> ConfigIO
-    Parse --> RuleList
-    Parse --> PredictCmd
-    Parse --> RuleCmd
-    Parse --> Start
-    Start --> Router
+    UI --> TauriCmd
+    TauriCmd --> API
+    API --> ConfigIO
+    API --> Svc
+    API --> Net
+    Svc --> RoustExe
+    RoustExe --> Router
     ConfigIO --> Router
-    Router --> Match
-    Router --> GwMap
-    GwMap --> Adapters
-    PredictCmd --> BestRoute
-    BestRoute --> Adapters
-    Router --> WinDiv
-    WinDiv --> Driver
+    Router --> Net
+    Net --> Adapters
+    Net --> BestRoute
+    Router --> Driver
 ```
 
 ## Binaries and crate layout
 
 | Artifact | Path | Role |
 |----------|------|------|
-| `roust.exe` | `src/main.rs` | Main CLI: rules, rule list, egress prediction, `start` / `stop` / `status` |
-| `roust-setup.exe` | `src/bin/roust-setup.rs` | Post-install: WinDivert ZIP, IP lists, user PATH |
-| Library | `src/lib.rs` | Shared `setup` and `update` modules |
+| `roust.exe` | `src/main.rs` | Windows service daemon; installer hooks `--install-service` / `--uninstall-service` |
+| `roust-setup.exe` | `src/bin/roust-setup.rs` | Post-install CLI: WinDivert ZIP, IP lists, user PATH |
+| Roust app | `gui/` (Tauri) | User-facing UI for rules, egress prediction, service start/stop |
+| Library | `src/lib.rs` | Shared `api`, `config`, `core`, `network`, `service`, `setup`, `update` |
 
 Cargo is configured for **Windows MSVC only** (`build.rs` panics on non-Windows targets). WinDivert is linked at build time from `WinDivert-2.2.2-A/` (or `ROUST_WINDIVERT_SDK`).
 
@@ -64,71 +65,51 @@ Cargo is configured for **Windows MSVC only** (`build.rs` panics on non-Windows 
 
 | Module | Responsibility |
 |--------|----------------|
-| `cli/` | Clap command tree and global `--config` |
-| `config/` | `routes.json` (or `%ProgramData%\roust\routes.json`) — rules as JSON array |
+| `api/` | Shared logic for the GUI: list/add/edit/delete rules, predict egress, service status and control |
+| `config/` | `routes.json` in the install directory — rules as JSON array |
 | `network/` | `GetAdaptersInfo`, `GetBestRoute`, egress prediction |
 | `core/` | `PacketRouter` + WinDivert FFI and safe handle wrapper |
+| `service/` | SCM registration, `--run-as-service` dispatcher, force-stop/restart |
 | `update/` | Download Iran aggregated blocks and private IP lists |
 | `setup/` | Installer helper: ZIP extract, PATH scripts, optional rustup |
 
 ## Configuration model
 
-Rules live in `routes.json`. Default resolution order:
-
-1. `%ProgramData%\roust\routes.json` if it exists  
-2. Otherwise `./routes.json` in the current working directory (created on first `add` if missing)
-
-You can override with `--config <path>`.
+Rules live in `routes.json` beside `roust.exe` in the install directory (`Config::default_config_path`).
 
 ### Rule shape
 
 ```json
 [
   {
-    "ip": "192.168.1.0/24",
-    "gateway": "192.168.1.1",
-    "rewrite_to": "10.0.0.1"
+    "cidr": "192.168.1.0/24",
+    "rewrite-to": "192.168.1.1"
   }
 ]
 ```
 
 | Field | Meaning |
 |-------|---------|
-| `ip` | Exact IPv4/IPv6 string, CIDR (e.g. `10.0.0.0/8`), or `*` (match all) |
-| `gateway` | Default gateway IPv4 of the target interface |
-| `rewrite_to` | Optional: replace destination IPv4 in the packet before reinject |
+| `cidr` | IPv4 CIDR block (e.g. `10.0.0.0/8`, `212.80.19.12/32`) |
+| `rewrite-to` | MAC address, NIC name, or default gateway IPv4 of the target interface |
 
 **Matching order:** Rules are scanned in array order; the **first** matching rule wins (`config::Config::find_compiled` on the in-memory compiled table at runtime).
 
-**Validation:** CIDR and single IPs are parsed with `ipnetwork` / `std::net::IpAddr`; `rewrite_to` must parse as an IP.
+**Validation:** Match values must be IPv4 CIDR blocks (include a `/prefix`; plain IPs and `*` are rejected). `rewrite-to` is classified as gateway IP, MAC, or NIC name.
 
-## CLI commands
+## Managing rules and service (Roust app)
 
-### Egress prediction (no WinDivert)
+The Tauri frontend invokes `api` functions via commands in `gui/src-tauri/src/lib.rs`:
 
-- **`roust predict --ip <ipv4>`** — Calls `GetBestRoute` for the destination and prints `if_index`, next hop, and matched NIC name/description. This is what Windows would use **before** any roust rule is applied.
-
-### Rule management
-
-- **`roust rule list`** — Prints all rules from `routes.json` (or `--config` path).
-
-Subcommands `add`, `delete`, `edit` use a shared `rule` action with flags:
-
-- `--ip` — Single destination or CIDR  
-- `--gateway` — Default gateway IPv4 of the target interface  
-- `--rewrite-to` — Optional destination rewrite  
-- `--file` — Bulk import from `.json` array or line-oriented text file  
-
-On `add` and `edit`, the gateway must match a default gateway on a local interface (adapter list + IPv4 forward table). While the service is running, rule changes take effect automatically within about one second (config file watcher); restart is only needed after binary updates.
-
-### Router lifecycle
-
-| Command | Behavior |
-|---------|----------|
-| `roust start` | Start the Windows service (SCM runs `roust.exe --run-as-service`) |
-| `roust stop` | Stop the Windows service |
-| `roust restart` | Stop then start the service |
-| `roust status` | Print SCM state and config path |
+| App action | API function | Behavior |
+|------------|--------------|----------|
+| List rules | `list_rules` | Read `routes.json` |
+| List adapters / gateways | `list_gateways` | Enumerate NICs with MAC and default gateway |
+| Predict egress | `predict_route` | `GetBestRoute` for a destination IPv4 (kernel view, before roust rules) |
+| Add / edit / delete rule | `add_rule`, `edit_rule`, `delete_rule` | Validate targets, save config; live reload within ~1s when service is running |
+| Import rules | `import_rules_from_file` | Bulk import from JSON or line-oriented text |
+| Service status | `service_status` | SCM state, install directory, version |
+| Start / stop / restart | `start_service`, `stop_service`, `restart_service` | Control Windows service **Roust** |
 
 Service registration is done by **installer.ps1** or the hidden flag `roust --install-service` (elevated). Unregister with `roust --uninstall-service`.
 
@@ -136,9 +117,9 @@ Service registration is done by **installer.ps1** or the hidden flag `roust --in
 
 **roust-setup** downloads Iran aggregated and private IP lists via `update::run` and `update::run_private_ips` → `iran_aggregated.json`, `ipv4.txt`, `ipv6.txt`, `ipv4_cidr.txt`, `ipv6_cidr.txt`, `private_ips.json`, etc. in the install directory.
 
-## Packet routing pipeline (`roust start`)
+## Packet routing pipeline (service running)
 
-When the router runs, this is the per-packet flow:
+When the router runs under SCM, this is the per-packet flow:
 
 ```mermaid
 sequenceDiagram
@@ -176,7 +157,7 @@ sequenceDiagram
 ### Rule application
 
 1. **Direction** — Read `WinDivertAddress.Outbound`: outbound packets use destination matching; inbound packets use source matching (the remote peer for traffic in both directions).  
-2. **Match** — `Config::find_compiled` against pre-parsed rule patterns (exact, CIDR, or `*`).  
+2. **Match** — `Config::find_compiled` against pre-parsed CIDR patterns.  
 3. **Redirect interface** — At start, each rule’s `gateway` is resolved to `if_index` via `GetAdaptersAddresses` gateways and the IPv4 forward table (`0.0.0.0/0` per interface). Matching prefixes get `route add … via <gateway> IF <if_index>`; WinDivert does not set outbound `IfIdx`.  
 4. **Optional rewrite** — If `rewrite_to` is set: outbound packets rewrite **destination**; inbound packets rewrite **source** (symmetric to split-tunnel semantics). Recompute the IPv4 header checksum.  
 5. **Checksums** — `WinDivertHelperCalcChecksums` when the IPv4 header was modified.  
@@ -184,7 +165,7 @@ sequenceDiagram
 
 ### Shutdown
 
-A console Ctrl+C handler sets a global atomic flag and calls `WinDivertShutdown` on the open handle so `WinDivertRecv` unblocks. On exit, the router prints separate routed vs passed-through counts for inbound and outbound.
+Service stop sets a shutdown flag and calls `WinDivertShutdown` on the open handle so `WinDivertRecv` unblocks. Host routes installed for rules are removed on stop.
 
 ## Network layer details
 
@@ -198,17 +179,9 @@ Uses `GetAdaptersAddresses` (`GAA_FLAG_INCLUDE_GATEWAYS`) to collect:
 - `IfIndex` → `if_index` (used for host routes and route prediction)  
 - First IPv4 unicast, first IPv4 gateway, MAC, coarse type (Ethernet / WiFi / Other)
 
-### Egress prediction (`predict --ip`)
+### Egress prediction (`api::predict_route`)
 
 `GetBestRoute(dest, 0, &mut MIB_IPFORWARDROW)` returns the forward interface index and next hop. That index is correlated with the adapter list for human-readable NIC output. This is the **kernel routing table** view, independent of roust rules.
-
-## Runtime bootstrap
-
-On every `roust` launch, `main` ensures in the **current directory**:
-
-- `settings.json` — created as `{}` if missing  
-
-This file is a placeholder for future persistence; the active routing config is `routes.json` (or the path passed via `--config`).
 
 ## Setup and installation (`roust-setup`)
 
@@ -220,15 +193,13 @@ This file is a placeholder for future persistence; the active routing config is 
 4. **IP lists** — `update::run` + `update::run_private_ips` unless skipped  
 5. **User PATH** — PowerShell script appends install dir (unless `--skip-path` / `ROUST_SKIP_PATH`)
 
-The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\roust`, runs staging, and bundles the same flow.
-
 **Uninstall:** `roust-setup --uninstall-path` removes the install directory from the user PATH.
 
 ## Build and dependencies
 
 - **Link time:** `build.rs` adds `WinDivert.lib` from `WinDivert-2.2.2-A/x64` (or x86).  
 - **Run time:** `WinDivert.dll` and driver must be beside `roust.exe` (setup or manual copy). Administrator rights are typically required for WinDivert.  
-- **Crates:** `clap`, `serde`/`serde_json`, `ipnetwork`, `windows` Win32 IP Helper APIs, `ureq` (HTTP), `zip` (setup).
+- **Crates:** `clap` (roust-setup only), `serde`/`serde_json`, `ipnetwork`, `windows` Win32 IP Helper APIs, `ureq` (HTTP), `zip` (setup).
 
 ## Environment variables
 
@@ -239,38 +210,27 @@ The Inno Setup wizard (`installer/roust.iss`) installs to `C:\Program Files\rous
 | `ROUST_IR_AGGREGATED_JSON_URL` | Iran IP JSON source for `update` |
 | `ROUST_PRIVATE_IPS_JSON_URL` | Private IP JSON source |
 | `ROUST_INSTALL_RUST` / `ROUST_SKIP_*` | Control setup steps (lists, path, windivert, rust) |
-| `RUST_LOG` | Standard `env_logger` filter for verbose diagnostics |
+| `RUST_LOG` | Standard `env_logger` filter for verbose diagnostics (service logs to `logs/roust-service.log`) |
 
 ## Security and operational notes
 
 - **Privileges:** WinDivert installation and capture usually require elevation.  
 - **Scope:** **Inbound and outbound IPv4** at the network layer; IPv6 packets are not matched or rewritten (they pass through unchanged).  
-- **Rule vs route table:** `roust predict --ip` shows Windows’ choice; `start` installs more-specific host routes for matched prefixes so egress uses the rule’s gateway/interface, which can differ from `GetBestRoute` for those IPs.  
+- **Rule vs route table:** Egress prediction in the app shows Windows’ choice; the running service installs more-specific host routes for matched prefixes so egress uses the rule’s gateway/interface, which can differ from `GetBestRoute` for those IPs.  
 - **Windows service:** The router runs under SCM as service **Roust**; logs go to `logs/roust-service.log` in the install directory. Install via `installer.ps1` or `roust --install-service` (admin).  
 - **Traffic integrity:** Modified packets get checksum recalculation; unmodified packets pass through unchanged.
 
 ## Example end-to-end workflow
 
-```powershell
-# 1. See what Windows would do without roust
-roust predict --ip 8.8.8.8
+1. Run **roust-setup** or the installer wizard (WinDivert, IP lists, PATH, service registration).
+2. Open the **Roust** app — use **Predict** to see what Windows would do for a destination IP.
+3. Add rules (CIDR blocks or import a file) targeting each interface’s default gateway.
+4. Start the service from the app. Rules reload automatically when `routes.json` changes.
 
-# 2. Add rules (file or single IP) — use each interface's default gateway IPv4
-roust add rule --file private_ips.json --gateway 192.168.1.1
-roust add rule --ip 2.144.0.0/14 --gateway 10.0.0.1
+## Migration notes
 
-# 3. List configured rules
-roust rule list
-
-# 4. Start interception (admin PowerShell)
-roust start
-```
-
-## Planned / partial features
-
-- Service recovery actions (restart on failure) and richer `status` output.  
-- Deeper use of `settings.json` for state beyond routing rules.  
-- Old configs used `"nic": "Ethernet"`; that field is rejected with a migration message. Use `"gateway": "<ipv4>"` (default gateway of the target interface).
+- Old configs used `"nic": "Ethernet"`; that field is rejected with a migration message. Use `"rewrite-to"` with a MAC address, NIC name, or gateway IP.
+- Old match fields `"ip"`, `"ip-or-cidr"`, plain IPs, and `"*"` are no longer accepted. Use `"cidr"` with an explicit prefix (e.g. `8.8.8.8/32` for a single host).
 
 ## Related files
 

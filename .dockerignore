@@ -13,6 +13,5 @@ gui/dist
 
 # Runtime / local artifacts
 **/*.log
-**/settings.json
 core/installer/staging
 core/installer/output
