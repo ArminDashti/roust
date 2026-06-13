@@ -8,3 +8,4 @@
 # Runtime / debug artifacts
 *.log
 *.err
+/target
