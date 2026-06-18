@@ -1,4 +1,4 @@
-use crate::config::{CompiledRule, IpMatch};
+use crate::config::{CompiledRule, MatchPattern};
 use anyhow::{anyhow, Result};
 use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
@@ -102,10 +102,12 @@ pub fn install_routes_for_rules(rules: &[CompiledRule]) -> Result<Vec<InstalledR
 
     for rule in rules {
         let (dest, prefix_len) = match &rule.match_pattern {
-            IpMatch::Network(net) => match net.network() {
+            MatchPattern::Network(net) => match net.network() {
                 IpAddr::V4(v4) => (v4, net.prefix()),
                 _ => continue,
             },
+            MatchPattern::Ip(ip) => (*ip, 32),
+            MatchPattern::Interface(_) => continue,
         };
 
         if prefix_len == 0 {

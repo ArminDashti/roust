@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
+type TargetKind = "nic" | "ip" | "cidr" | "mac";
+type DestinationKind = "nic" | "ip" | "mac";
+
 type ServiceStatus = {
   state: string;
   installed: boolean;
@@ -9,8 +12,10 @@ type ServiceStatus = {
 };
 
 type RoutingRule = {
-  cidr: string;
-  "rewrite-to": string;
+  target: TargetKind;
+  "target-value": string;
+  destination: DestinationKind;
+  "destination-value": string;
 };
 
 type GatewayRow = {
@@ -41,7 +46,10 @@ const viewTitle: Record<ViewId, string> = {
   predict: "Route Predict",
 };
 
-let editingRuleCidr: string | null = null;
+const TARGET_OPTIONS: TargetKind[] = ["nic", "ip", "cidr", "mac"];
+const DESTINATION_OPTIONS: DestinationKind[] = ["nic", "ip", "mac"];
+
+let editingRuleIndex: number | null = null;
 let pendingImportPath: string | null = null;
 
 const toastEl = document.getElementById("toast")!;
@@ -60,12 +68,28 @@ const predictResult = document.getElementById("predict-result")!;
 const ruleDialog = document.getElementById("rule-dialog") as HTMLDialogElement;
 const ruleForm = document.getElementById("rule-form") as HTMLFormElement;
 const ruleDialogTitle = document.getElementById("rule-dialog-title")!;
-const ruleCidrInput = document.getElementById("rule-cidr") as HTMLInputElement;
-const ruleRewriteInput = document.getElementById("rule-rewrite") as HTMLInputElement;
+const ruleTargetSelect = document.getElementById("rule-target") as HTMLSelectElement;
+const ruleTargetValueInput = document.getElementById("rule-target-value") as HTMLInputElement;
+const ruleDestinationSelect = document.getElementById("rule-destination") as HTMLSelectElement;
+const ruleDestinationValueInput = document.getElementById(
+  "rule-destination-value",
+) as HTMLInputElement;
 const importDialog = document.getElementById("import-dialog") as HTMLDialogElement;
 const importForm = document.getElementById("import-form") as HTMLFormElement;
 const importFileLabel = document.getElementById("import-file-label")!;
-const importRewriteInput = document.getElementById("import-rewrite") as HTMLInputElement;
+
+function fillSelect(select: HTMLSelectElement, options: string[], selected?: string) {
+  select.replaceChildren();
+  for (const option of options) {
+    const el = document.createElement("option");
+    el.value = option;
+    el.textContent = option;
+    if (option === selected) {
+      el.selected = true;
+    }
+    select.append(el);
+  }
+}
 
 function showToast(message: string, isError = false) {
   toastEl.textContent = message;
@@ -126,11 +150,13 @@ async function loadRules() {
   rulesBody.replaceChildren();
   rulesEmpty.classList.toggle("hidden", rules.length > 0);
 
-  for (const rule of rules) {
+  rules.forEach((rule, index) => {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td><code>${escapeHtml(rule.cidr)}</code></td>
-      <td><code>${escapeHtml(rule["rewrite-to"])}</code></td>
+      <td><code>${escapeHtml(rule.target)}</code></td>
+      <td><code>${escapeHtml(rule["target-value"])}</code></td>
+      <td><code>${escapeHtml(rule.destination)}</code></td>
+      <td><code>${escapeHtml(rule["destination-value"])}</code></td>
       <td class="actions">
         <button type="button" class="btn btn-ghost btn-sm" data-action="edit">Edit</button>
         <button type="button" class="btn btn-ghost btn-sm danger" data-action="delete">Delete</button>
@@ -138,11 +164,12 @@ async function loadRules() {
     `;
 
     row.querySelector('[data-action="edit"]')?.addEventListener("click", () => {
-      openRuleDialog(rule);
+      openRuleDialog(index, rule);
     });
     row.querySelector('[data-action="delete"]')?.addEventListener("click", async () => {
-      if (!confirm(`Delete rule for ${rule.cidr}?`)) return;
-      const result = await invokeOrToast<RuleMutationResult>("delete_rule", { cidr: rule.cidr });
+      const label = `${rule.target}:${rule["target-value"]}`;
+      if (!confirm(`Delete rule ${label}?`)) return;
+      const result = await invokeOrToast<RuleMutationResult>("delete_rule", { index });
       if (result) {
         showToast(result.message + (result.live_apply_hint ? ` ${result.live_apply_hint}` : ""));
         await refreshAll();
@@ -150,7 +177,7 @@ async function loadRules() {
     });
 
     rulesBody.append(row);
-  }
+  });
 }
 
 async function loadGateways() {
@@ -171,26 +198,26 @@ async function loadGateways() {
   }
 }
 
-function openRuleDialog(rule?: RoutingRule) {
-  editingRuleCidr = rule?.cidr ?? null;
+function openRuleDialog(index: number | null, rule?: RoutingRule) {
+  editingRuleIndex = index;
   ruleDialogTitle.textContent = rule ? "Edit Rule" : "Add Rule";
-  ruleCidrInput.value = rule?.cidr ?? "";
-  ruleCidrInput.readOnly = Boolean(rule);
-  ruleRewriteInput.value = rule?.["rewrite-to"] ?? "";
+  fillSelect(ruleTargetSelect, TARGET_OPTIONS, rule?.target);
+  ruleTargetValueInput.value = rule?.["target-value"] ?? "";
+  fillSelect(ruleDestinationSelect, DESTINATION_OPTIONS, rule?.destination);
+  ruleDestinationValueInput.value = rule?.["destination-value"] ?? "";
   ruleDialog.showModal();
 }
 
 async function openImportDialog(filePath: string) {
   pendingImportPath = filePath;
   importFileLabel.textContent = filePath;
-  importRewriteInput.value = "";
   importDialog.showModal();
 }
 
 async function startRulesImport() {
   const selected = await open({
     multiple: false,
-    filters: [{ name: "Rules", extensions: ["json", "txt"] }],
+    filters: [{ name: "Rules", extensions: ["json"] }],
   });
 
   if (typeof selected !== "string") return;
@@ -245,7 +272,7 @@ document.getElementById("restart-btn")?.addEventListener("click", async () => {
 });
 
 document.getElementById("add-rule-btn")?.addEventListener("click", () => {
-  openRuleDialog();
+  openRuleDialog(null);
 });
 
 document.getElementById("import-rules-btn")?.addEventListener("click", () => {
@@ -261,12 +288,8 @@ importForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!pendingImportPath) return;
 
-  const defaultRewriteRaw = importRewriteInput.value.trim();
-  const default_rewrite_to = defaultRewriteRaw.length > 0 ? defaultRewriteRaw : null;
-
   const result = await invokeOrToast<RuleMutationResult>("import_rules", {
     file_path: pendingImportPath,
-    default_rewrite_to,
   });
 
   if (result) {
@@ -283,12 +306,19 @@ document.getElementById("rule-cancel")?.addEventListener("click", () => {
 
 ruleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const cidr = ruleCidrInput.value.trim();
-  const rewrite_to = ruleRewriteInput.value.trim();
+  const target = ruleTargetSelect.value as TargetKind;
+  const target_value = ruleTargetValueInput.value.trim();
+  const destination = ruleDestinationSelect.value as DestinationKind;
+  const destination_value = ruleDestinationValueInput.value.trim();
 
-  const result = editingRuleCidr
-    ? await invokeOrToast<RuleMutationResult>("edit_rule", { cidr, rewrite_to })
-    : await invokeOrToast<RuleMutationResult>("add_rule", { cidr, rewrite_to });
+  const args = { target, target_value, destination, destination_value };
+  const result =
+    editingRuleIndex !== null
+      ? await invokeOrToast<RuleMutationResult>("edit_rule", {
+          index: editingRuleIndex,
+          ...args,
+        })
+      : await invokeOrToast<RuleMutationResult>("add_rule", args);
 
   if (result) {
     showToast(result.message + (result.live_apply_hint ? ` ${result.live_apply_hint}` : ""));
@@ -329,6 +359,8 @@ function row(label: string, value: string) {
 }
 
 void (async () => {
+  fillSelect(ruleTargetSelect, TARGET_OPTIONS, "cidr");
+  fillSelect(ruleDestinationSelect, DESTINATION_OPTIONS, "ip");
   const path = await invokeOrToast<string>("get_config_path");
   if (path) {
     configPathLabel.textContent = path;

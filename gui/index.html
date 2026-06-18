@@ -72,8 +72,10 @@
             <table>
               <thead>
                 <tr>
-                  <th>CIDR</th>
-                  <th>Rewrite To</th>
+                  <th>Target</th>
+                  <th>Target Value</th>
+                  <th>Destination</th>
+                  <th>Destination Value</th>
                   <th></th>
                 </tr>
               </thead>
@@ -124,17 +126,8 @@
         </header>
         <p id="import-file-label" class="path-line"></p>
         <p class="hint">
-          Accepts a JSON array of rule objects or CIDR strings. CIDR-only lists need a default
-          rewrite target.
+          JSON array of rule objects with target, target-value, destination, and destination-value.
         </p>
-        <label>
-          Default Rewrite To <span class="muted">(for CIDR-only lists)</span>
-          <input
-            id="import-rewrite"
-            name="default_rewrite_to"
-            placeholder="MAC address, NIC name, or gateway IP"
-          />
-        </label>
         <footer>
           <button type="button" id="import-cancel" class="btn">Cancel</button>
           <button type="submit" class="btn btn-accent">Import</button>
@@ -148,16 +141,29 @@
           <h3 id="rule-dialog-title">Add Rule</h3>
         </header>
         <label>
-          CIDR
-          <input id="rule-cidr" name="cidr" required placeholder="10.0.0.0/8" />
+          Target
+          <select id="rule-target" name="target" required></select>
         </label>
         <label>
-          Rewrite To
+          Target Value
           <input
-            id="rule-rewrite"
-            name="rewrite_to"
+            id="rule-target-value"
+            name="target_value"
             required
-            placeholder="MAC address, NIC name, or gateway IP"
+            placeholder="e.g. 10.0.0.0/8, 8.8.8.8, Ethernet, AA:BB:CC:DD:EE:FF"
+          />
+        </label>
+        <label>
+          Destination
+          <select id="rule-destination" name="destination" required></select>
+        </label>
+        <label>
+          Destination Value
+          <input
+            id="rule-destination-value"
+            name="destination_value"
+            required
+            placeholder="NIC name, gateway IP, or MAC address"
           />
         </label>
         <footer>
