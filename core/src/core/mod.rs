@@ -145,14 +145,14 @@ impl PacketRouter {
             match rule.egress_ipv4 {
                 Some(egress) => log::info!(
                     "  {} → gateway {} (if_index={}, egress_src={})",
-                    rule.cidr_label,
+                    rule.label,
                     rule.gateway,
                     rule.if_index,
                     egress
                 ),
                 None => log::info!(
                     "  {} → gateway {} (if_index={})",
-                    rule.cidr_label,
+                    rule.label,
                     rule.gateway,
                     rule.if_index
                 ),
@@ -193,7 +193,8 @@ impl PacketRouter {
             let packet = &mut buf[..recv_len];
             let outbound = addr.is_outbound();
             let rules = self.compiled_rules.read().unwrap();
-            let routed = Self::apply_rules(packet, &mut addr, &rules, outbound);
+            let if_idx = addr.network().if_idx;
+            let routed = Self::apply_rules(packet, &mut addr, &rules, outbound, if_idx);
             drop(rules);
             if routed {
                 if outbound {
@@ -234,6 +235,7 @@ impl PacketRouter {
         _addr: &mut WinDivertAddress,
         compiled_rules: &[CompiledRule],
         outbound: bool,
+        if_idx: u32,
     ) -> bool {
         let match_ip = if outbound {
             Self::extract_dst_ipv4(_packet)
@@ -244,7 +246,7 @@ impl PacketRouter {
             return false;
         };
 
-        let Some(_rule) = Config::find_compiled(compiled_rules, match_ip) else {
+        let Some(_rule) = Config::find_compiled(compiled_rules, match_ip, if_idx) else {
             return false;
         };
 
@@ -343,14 +345,14 @@ fn reload_config_from_disk(
         match rule.egress_ipv4 {
             Some(egress) => log::info!(
                 "  {} → gateway {} (if_index={}, egress_src={})",
-                rule.cidr_label,
+                rule.label,
                 rule.gateway,
                 rule.if_index,
                 egress
             ),
             None => log::info!(
                 "  {} → gateway {} (if_index={})",
-                rule.cidr_label,
+                rule.label,
                 rule.gateway,
                 rule.if_index
             ),
@@ -389,15 +391,15 @@ mod tests {
         let mut pkt = sample_ipv4_packet([10, 138, 172, 26], [212, 80, 19, 12]);
         let mut addr = WinDivertAddress::zeroed();
         let rules = vec![CompiledRule {
-            cidr_label: "212.80.19.12/32".to_string(),
+            label: "cidr:212.80.19.12/32 → ip:192.168.1.1".to_string(),
             gateway: Ipv4Addr::new(192, 168, 1, 1),
-            match_pattern: crate::config::IpMatch::Network(
+            match_pattern: crate::config::MatchPattern::Network(
                 "212.80.19.12/32".parse().unwrap(),
             ),
             if_index: 21,
             egress_ipv4: Some(Ipv4Addr::new(192, 168, 1, 101)),
         }];
-        assert!(!PacketRouter::apply_rules(&mut pkt, &mut addr, &rules, true));
+        assert!(!PacketRouter::apply_rules(&mut pkt, &mut addr, &rules, true, 0));
         assert_eq!(
             PacketRouter::extract_src_ipv4(&pkt),
             Some(Ipv4Addr::new(10, 138, 172, 26))

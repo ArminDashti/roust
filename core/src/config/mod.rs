@@ -6,20 +6,21 @@ use std::fs;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 
-/// Pre-parsed CIDR match pattern used on the packet hot path (no JSON or CIDR parsing per packet).
+/// Pre-parsed match pattern used on the packet hot path.
 #[derive(Debug, Clone)]
-pub enum IpMatch {
+pub enum MatchPattern {
     Network(IpNetwork),
+    Ip(Ipv4Addr),
+    Interface(u32),
 }
 
-/// One routing rule with gateway resolved to `if_index` at startup; kept entirely in memory while running.
+/// One routing rule with gateway resolved to `if_index` at startup.
 #[derive(Debug, Clone)]
 pub struct CompiledRule {
-    pub cidr_label: String,
+    pub label: String,
     pub gateway: Ipv4Addr,
-    pub match_pattern: IpMatch,
+    pub match_pattern: MatchPattern,
     pub if_index: u32,
-    /// Primary IPv4 on the target interface; used to rewrite outbound source when redirecting egress.
     pub egress_ipv4: Option<Ipv4Addr>,
 }
 
@@ -31,82 +32,67 @@ pub struct MacEntry {
     pub egress_ipv4: Option<Ipv4Addr>,
 }
 
-/// Classified routing target parsed from a single `rewrite-to` value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RewriteTargetKind {
-    Mac(String),
-    Nic(String),
-    Gateway(String),
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetKind {
+    Nic,
+    Ip,
+    Cidr,
+    Mac,
 }
 
-impl CompiledRule {
-    /// Return true when this rule's pattern matches the given IPv4 address.
-    /// Outbound packets match on destination; inbound packets match on source (remote peer).
-    pub fn matches(&self, dest: Ipv4Addr) -> bool {
-        match &self.match_pattern {
-            IpMatch::Network(network) => network.contains(IpAddr::V4(dest)),
-        }
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DestinationKind {
+    Nic,
+    Ip,
+    Mac,
 }
 
 /// A routing rule as stored in `routes.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoutingRule {
-    pub cidr: String,
-    #[serde(rename = "rewrite-to")]
-    pub rewrite_to: String,
+    pub target: TargetKind,
+    #[serde(rename = "target-value")]
+    pub target_value: String,
+    pub destination: DestinationKind,
+    #[serde(rename = "destination-value")]
+    pub destination_value: String,
 }
 
-/// Input struct for loading `routes.json`; accepts legacy rewrite-target field names only.
-#[derive(Debug, Deserialize)]
-struct RoutingRuleInput {
-    cidr: String,
-    #[serde(rename = "rewrite-to", alias = "rewrite_to", default)]
-    rewrite_to: Option<String>,
-    #[serde(rename = "route-to-mac-address", default)]
-    mac: Option<String>,
-    #[serde(rename = "route-to-nic-name", default)]
-    nic: Option<String>,
-    #[serde(rename = "route-to-default-gateway", alias = "gateway", default)]
-    gateway: Option<String>,
-    #[serde(rename = "nic", default)]
-    legacy_nic: Option<String>,
-}
-
-impl RoutingRuleInput {
-    fn into_rule(self) -> Result<RoutingRule> {
-        if let Some(legacy_nic) = self.legacy_nic {
-            return Err(anyhow!(
-                "routing rule {} uses deprecated field \"nic\"; use \"rewrite-to\" with a MAC address, \
-                 NIC name, or gateway IP instead (got \"{legacy_nic}\")",
-                self.cidr
-            ));
+impl CompiledRule {
+    /// Outbound packets match on destination IP; inbound packets match on source IP (remote peer).
+    /// NIC/MAC targets match on the packet interface index from WinDivert.
+    pub fn matches(&self, peer_ip: Ipv4Addr, if_idx: u32) -> bool {
+        match &self.match_pattern {
+            MatchPattern::Network(network) => network.contains(IpAddr::V4(peer_ip)),
+            MatchPattern::Ip(ip) => *ip == peer_ip,
+            MatchPattern::Interface(index) => *index == if_idx,
         }
+    }
+}
 
-        let rewrite_to = if let Some(value) = self
-            .rewrite_to
-            .filter(|value| !value.trim().is_empty())
-        {
-            value.trim().to_string()
-        } else if let Some(mac) = self.mac.filter(|value| !value.is_empty()) {
-            mac.trim().to_string()
-        } else if let Some(nic) = self.nic.filter(|value| !value.is_empty()) {
-            nic.trim().to_string()
-        } else if let Some(gateway) = self.gateway.filter(|value| !value.is_empty()) {
-            gateway.trim().to_string()
-        } else {
-            return Err(anyhow!(
-                "routing rule {} must set \"rewrite-to\" to a MAC address, NIC name, or gateway IP \
-                 (see Adapters in the Roust app).",
-                self.cidr
-            ));
-        };
+impl RoutingRule {
+    pub fn label(&self) -> String {
+        format!(
+            "{}:{} → {}:{}",
+            serde_json::to_value(self.target)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_else(|| "?".into()),
+            self.target_value,
+            serde_json::to_value(self.destination)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_else(|| "?".into()),
+            self.destination_value
+        )
+    }
 
-        validate_cidr(&self.cidr)?;
-        Ok(RoutingRule {
-            cidr: self.cidr,
-            rewrite_to,
-        })
+    pub fn validate(&self) -> Result<()> {
+        validate_target(self.target, &self.target_value)?;
+        validate_destination_value(self.destination, &self.destination_value)?;
+        Ok(())
     }
 }
 
@@ -125,50 +111,56 @@ fn ipv4_ranges_overlap(a: &ipnetwork::Ipv4Network, b: &ipnetwork::Ipv4Network) -
     a_start <= b_end && b_start <= a_end
 }
 
-/// Reject duplicate or overlapping CIDR blocks in a rule list (e.g. routes JSON).
-pub fn validate_rules_cidrs(rules: &[RoutingRule]) -> Result<()> {
-    let mut seen: Vec<(String, ipnetwork::Ipv4Network)> = Vec::with_capacity(rules.len());
+/// Reject duplicate or overlapping CIDR targets in a rule list.
+pub fn validate_rules_cidr_targets(rules: &[RoutingRule]) -> Result<()> {
+    let mut seen: Vec<(String, ipnetwork::Ipv4Network)> = Vec::new();
 
     for rule in rules {
-        let network = ipv4_network(&rule.cidr)?;
+        if rule.target != TargetKind::Cidr {
+            continue;
+        }
+        let network = ipv4_network(&rule.target_value)?;
+        let label = rule.label();
 
         for (existing_label, existing_network) in &seen {
             if network == *existing_network {
                 return Err(anyhow!(
-                    "duplicate CIDR \"{}\" (same network as \"{existing_label}\")",
-                    rule.cidr
+                    "duplicate CIDR target \"{}\" (same network as \"{existing_label}\")",
+                    rule.target_value
                 ));
             }
             if ipv4_ranges_overlap(&network, existing_network) {
                 return Err(anyhow!(
-                    "overlapping CIDR blocks \"{}\" and \"{existing_label}\"",
-                    rule.cidr,
+                    "overlapping CIDR targets \"{}\" and \"{existing_label}\"",
+                    rule.target_value,
                 ));
             }
         }
 
-        seen.push((rule.cidr.clone(), network));
+        seen.push((label, network));
     }
 
     Ok(())
 }
 
-/// Reject a new rule when its CIDR duplicates or overlaps an existing rule.
-pub fn validate_new_rule_cidr(cidr: &str, existing: &[RoutingRule]) -> Result<()> {
+fn validate_new_cidr_target(cidr: &str, existing: &[RoutingRule]) -> Result<()> {
     let network = ipv4_network(cidr)?;
 
     for rule in existing {
-        let existing_network = ipv4_network(&rule.cidr)?;
+        if rule.target != TargetKind::Cidr {
+            continue;
+        }
+        let existing_network = ipv4_network(&rule.target_value)?;
         if network == existing_network {
             return Err(anyhow!(
-                "duplicate CIDR \"{cidr}\" (same network as \"{}\")",
-                rule.cidr
+                "duplicate CIDR target \"{cidr}\" (same network as \"{}\")",
+                rule.target_value
             ));
         }
         if ipv4_ranges_overlap(&network, &existing_network) {
             return Err(anyhow!(
-                "overlapping CIDR blocks \"{cidr}\" and \"{}\"",
-                rule.cidr,
+                "overlapping CIDR targets \"{cidr}\" and \"{}\"",
+                rule.target_value,
             ));
         }
     }
@@ -176,17 +168,16 @@ pub fn validate_new_rule_cidr(cidr: &str, existing: &[RoutingRule]) -> Result<()
     Ok(())
 }
 
-/// Validate that a rule match value is an IPv4 CIDR block (not a plain IP or wildcard).
 pub fn validate_cidr(cidr: &str) -> Result<IpNetwork> {
     let trimmed = cidr.trim();
     if trimmed == "*" {
         return Err(anyhow!(
-            "routing rule \"{trimmed}\" must be a CIDR block (e.g. 10.0.0.0/8); wildcards are not supported"
+            "CIDR target \"{trimmed}\" must be a CIDR block (e.g. 10.0.0.0/8); wildcards are not supported"
         ));
     }
     if !trimmed.contains('/') {
         return Err(anyhow!(
-            "routing rule \"{trimmed}\" must be a CIDR block (e.g. 10.0.0.0/8), not a plain IP address"
+            "CIDR target \"{trimmed}\" must include a prefix (e.g. 10.0.0.0/8)"
         ));
     }
     let network = trimmed
@@ -194,28 +185,20 @@ pub fn validate_cidr(cidr: &str) -> Result<IpNetwork> {
         .map_err(|e| anyhow!("invalid CIDR \"{trimmed}\": {e}"))?;
     match network {
         IpNetwork::V4(_) => Ok(network),
-        _ => Err(anyhow!("routing rule \"{trimmed}\" must be an IPv4 CIDR block")),
+        _ => Err(anyhow!("CIDR target \"{trimmed}\" must be an IPv4 CIDR block")),
     }
 }
 
-/// Detect whether `rewrite-to` is a MAC address, NIC name, or gateway IPv4.
-///
-/// Priority: IPv4 gateway > MAC pattern > NIC name.
-pub fn classify_rewrite_target(value: &str) -> Result<RewriteTargetKind> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(anyhow!("rewrite-to must not be empty"));
+pub fn validate_ipv4(ip: &str) -> Result<Ipv4Addr> {
+    let trimmed = ip.trim();
+    if trimmed.contains('/') {
+        return Err(anyhow!(
+            "IP target \"{trimmed}\" must be a plain IPv4 address, not a CIDR block"
+        ));
     }
-
-    if trimmed.parse::<Ipv4Addr>().is_ok() {
-        return Ok(RewriteTargetKind::Gateway(trimmed.to_string()));
-    }
-
-    if is_mac_address(trimmed) {
-        return Ok(RewriteTargetKind::Mac(normalize_mac(trimmed)));
-    }
-
-    Ok(RewriteTargetKind::Nic(trimmed.to_string()))
+    trimmed
+        .parse::<Ipv4Addr>()
+        .map_err(|_| anyhow!("invalid IPv4 address \"{trimmed}\""))
 }
 
 fn is_mac_address(value: &str) -> bool {
@@ -229,6 +212,51 @@ fn is_mac_address(value: &str) -> bool {
 
 fn normalize_mac(value: &str) -> String {
     value.replace('-', ":").to_ascii_uppercase()
+}
+
+pub fn validate_target(kind: TargetKind, value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("target-value must not be empty"));
+    }
+    match kind {
+        TargetKind::Cidr => {
+            validate_cidr(trimmed)?;
+        }
+        TargetKind::Ip => {
+            validate_ipv4(trimmed)?;
+        }
+        TargetKind::Mac => {
+            if !is_mac_address(trimmed) {
+                return Err(anyhow!(
+                    "target-value \"{trimmed}\" is not a valid MAC address (expected AA:BB:CC:DD:EE:FF)"
+                ));
+            }
+        }
+        TargetKind::Nic => {}
+    }
+    Ok(())
+}
+
+pub fn validate_destination_value(kind: DestinationKind, value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("destination-value must not be empty"));
+    }
+    match kind {
+        DestinationKind::Ip => {
+            validate_ipv4(trimmed)?;
+        }
+        DestinationKind::Mac => {
+            if !is_mac_address(trimmed) {
+                return Err(anyhow!(
+                    "destination-value \"{trimmed}\" is not a valid MAC address (expected AA:BB:CC:DD:EE:FF)"
+                ));
+            }
+        }
+        DestinationKind::Nic => {}
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,17 +279,16 @@ impl Config {
     }
 
     pub fn from_json_str(contents: &str) -> Result<Self> {
-        let inputs: Vec<RoutingRuleInput> = serde_json::from_str(contents).map_err(|e| {
+        let rules: Vec<RoutingRule> = serde_json::from_str(contents).map_err(|e| {
             anyhow!(
-                "invalid routes JSON (expected \
-                 [{{\"cidr\":\"...\",\"rewrite-to\":\"...\"}}]): {e}"
+                "invalid routes JSON (expected [{{\"target\":\"cidr\",\"target-value\":\"...\",\
+                 \"destination\":\"ip\",\"destination-value\":\"...\"}}]): {e}"
             )
         })?;
-        let rules = inputs
-            .into_iter()
-            .map(RoutingRuleInput::into_rule)
-            .collect::<Result<Vec<_>>>()?;
-        validate_rules_cidrs(&rules)?;
+        for rule in &rules {
+            rule.validate()?;
+        }
+        validate_rules_cidr_targets(&rules)?;
         Ok(Config { rules })
     }
 
@@ -270,46 +297,22 @@ impl Config {
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
-        if is_json {
-            if let Ok(rules) = serde_json::from_str::<Vec<RoutingRule>>(contents) {
-                for rule in &rules {
-                    validate_cidr(&rule.cidr)?;
-                }
-                validate_rules_cidrs(&rules)?;
-                return Ok(rules);
-            }
-            let cidrs: Vec<String> = serde_json::from_str(contents).map_err(|e| {
-                anyhow!(
-                    "JSON import must be [\"cidr\", ...] or \
-                     [{{\"cidr\":\"...\",\"rewrite-to\":\"...\"}}]: {e}"
-                )
-            })?;
-            let rules: Vec<RoutingRule> = cidrs
-                .into_iter()
-                .map(|cidr| {
-                    validate_cidr(&cidr)?;
-                    Ok(RoutingRule {
-                        cidr,
-                        rewrite_to: String::new(),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            validate_rules_cidrs(&rules)?;
-            return Ok(rules);
+        if !is_json {
+            return Err(anyhow!(
+                "import only supports JSON files with the new rule format \
+                 (target, target-value, destination, destination-value)"
+            ));
         }
-        let rules: Vec<RoutingRule> = contents
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(|line| {
-                validate_cidr(line)?;
-                Ok(RoutingRule {
-                    cidr: line.to_string(),
-                    rewrite_to: String::new(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        validate_rules_cidrs(&rules)?;
+        let rules: Vec<RoutingRule> = serde_json::from_str(contents).map_err(|e| {
+            anyhow!(
+                "JSON import must be an array of rule objects with target, target-value, \
+                 destination, and destination-value: {e}"
+            )
+        })?;
+        for rule in &rules {
+            rule.validate()?;
+        }
+        validate_rules_cidr_targets(&rules)?;
         Ok(rules)
     }
 
@@ -323,31 +326,46 @@ impl Config {
         Ok(())
     }
 
-    pub fn add_rule(&mut self, cidr: String, rewrite_to: String) -> Result<()> {
-        validate_cidr(&cidr)?;
-        let rewrite_to = rewrite_to.trim().to_string();
-        if rewrite_to.is_empty() {
-            return Err(anyhow!(
-                "rewrite-to must be a MAC address, NIC name, or gateway IP"
-            ));
+    pub fn add_rule(&mut self, rule: RoutingRule) -> Result<()> {
+        rule.validate()?;
+        if rule.target == TargetKind::Cidr {
+            validate_new_cidr_target(&rule.target_value, &self.rules)?;
         }
-        classify_rewrite_target(&rewrite_to)?;
-        validate_new_rule_cidr(&cidr, &self.rules)?;
-        self.rules.push(RoutingRule { cidr, rewrite_to });
+        self.rules.push(rule);
         Ok(())
     }
 
-    pub fn remove_rule(&mut self, cidr: &str) -> bool {
-        let initial_len = self.rules.len();
-        self.rules.retain(|rule| rule.cidr != cidr);
-        self.rules.len() < initial_len
+    pub fn remove_rule_at(&mut self, index: usize) -> bool {
+        if index >= self.rules.len() {
+            return false;
+        }
+        self.rules.remove(index);
+        true
+    }
+
+    pub fn replace_rule_at(&mut self, index: usize, rule: RoutingRule) -> Result<()> {
+        if index >= self.rules.len() {
+            return Err(anyhow!("rule index {index} not found"));
+        }
+        rule.validate()?;
+        if rule.target == TargetKind::Cidr {
+            let others: Vec<_> = self
+                .rules
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != index)
+                .map(|(_, r)| r.clone())
+                .collect();
+            validate_new_cidr_target(&rule.target_value, &others)?;
+        }
+        self.rules[index] = rule;
+        Ok(())
     }
 
     pub fn get_rules(&self) -> &[RoutingRule] {
         &self.rules
     }
 
-    /// Build an in-memory routing table from `rewrite-to` targets.
     pub fn compile_rules(
         &self,
         mac_map: &HashMap<String, MacEntry>,
@@ -356,10 +374,10 @@ impl Config {
     ) -> Result<Vec<CompiledRule>> {
         let mut compiled = Vec::with_capacity(self.rules.len());
         for rule in &self.rules {
-            let match_pattern = Self::compile_match_pattern(&rule.cidr)?;
-            let entry = Self::resolve_entry(rule, mac_map, nic_map, gw_map)?;
+            let match_pattern = Self::compile_target(rule.target, &rule.target_value, mac_map, nic_map)?;
+            let entry = Self::resolve_destination(rule, mac_map, nic_map, gw_map)?;
             compiled.push(CompiledRule {
-                cidr_label: rule.cidr.clone(),
+                label: rule.label(),
                 gateway: entry.gateway,
                 match_pattern,
                 if_index: entry.if_index,
@@ -369,52 +387,79 @@ impl Config {
         Ok(compiled)
     }
 
-    fn resolve_entry<'a>(
+    fn resolve_destination<'a>(
         rule: &RoutingRule,
         mac_map: &'a HashMap<String, MacEntry>,
         nic_map: &'a HashMap<String, MacEntry>,
         gw_map: &'a HashMap<Ipv4Addr, MacEntry>,
     ) -> Result<&'a MacEntry> {
-        match classify_rewrite_target(&rule.rewrite_to)? {
-            RewriteTargetKind::Mac(mac) => mac_map.get(&mac).ok_or_else(|| {
-                anyhow!(
-                    "routing rule {} → MAC {} not found on any local interface",
-                    rule.cidr, mac
-                )
-            }),
-            RewriteTargetKind::Nic(nic) => nic_map.get(&nic.to_ascii_lowercase()).ok_or_else(|| {
-                anyhow!(
-                    "routing rule {} → NIC name \"{}\" not found on any local interface",
-                    rule.cidr, nic
-                )
-            }),
-            RewriteTargetKind::Gateway(gateway) => {
-                let gw: Ipv4Addr = gateway.parse().map_err(|e| {
+        let label = rule.label();
+        match rule.destination {
+            DestinationKind::Mac => {
+                let mac = normalize_mac(&rule.destination_value);
+                mac_map.get(&mac).ok_or_else(|| {
                     anyhow!(
-                        "routing rule {} has invalid gateway \"{gateway}\": {e}",
-                        rule.cidr
+                        "rule {label}: destination MAC {mac} not found on any local interface"
                     )
-                })?;
+                })
+            }
+            DestinationKind::Nic => {
+                let nic = rule.destination_value.trim();
+                nic_map.get(&nic.to_ascii_lowercase()).ok_or_else(|| {
+                    anyhow!(
+                        "rule {label}: destination NIC \"{nic}\" not found on any local interface"
+                    )
+                })
+            }
+            DestinationKind::Ip => {
+                let gw: Ipv4Addr = validate_ipv4(&rule.destination_value)?;
                 gw_map.get(&gw).ok_or_else(|| {
                     anyhow!(
-                        "routing rule {} → gateway {} is not a default gateway on any local interface",
-                        rule.cidr, gateway
+                        "rule {label}: destination IP {gw} is not a default gateway on any local interface"
                     )
                 })
             }
         }
     }
 
-    /// Look up the first matching compiled rule for a destination IPv4 (in-memory only).
     pub fn find_compiled<'a>(
         compiled: &'a [CompiledRule],
-        dest: Ipv4Addr,
+        peer_ip: Ipv4Addr,
+        if_idx: u32,
     ) -> Option<&'a CompiledRule> {
-        compiled.iter().find(|rule| rule.matches(dest))
+        compiled.iter().find(|rule| rule.matches(peer_ip, if_idx))
     }
 
-    fn compile_match_pattern(cidr: &str) -> Result<IpMatch> {
-        Ok(IpMatch::Network(validate_cidr(cidr)?))
+    fn compile_target(
+        kind: TargetKind,
+        value: &str,
+        mac_map: &HashMap<String, MacEntry>,
+        nic_map: &HashMap<String, MacEntry>,
+    ) -> Result<MatchPattern> {
+        let trimmed = value.trim();
+        match kind {
+            TargetKind::Cidr => Ok(MatchPattern::Network(validate_cidr(trimmed)?)),
+            TargetKind::Ip => Ok(MatchPattern::Ip(validate_ipv4(trimmed)?)),
+            TargetKind::Mac => {
+                let mac = normalize_mac(trimmed);
+                let entry = mac_map.get(&mac).ok_or_else(|| {
+                    anyhow!(
+                        "target MAC {mac} not found on any local interface \
+                         (see Gateways in the Roust app)"
+                    )
+                })?;
+                Ok(MatchPattern::Interface(entry.if_index))
+            }
+            TargetKind::Nic => {
+                let entry = nic_map.get(&trimmed.to_ascii_lowercase()).ok_or_else(|| {
+                    anyhow!(
+                        "target NIC \"{trimmed}\" not found on any local interface \
+                         (see Gateways in the Roust app)"
+                    )
+                })?;
+                Ok(MatchPattern::Interface(entry.if_index))
+            }
+        }
     }
 
     pub fn default_config_path() -> PathBuf {
@@ -444,191 +489,174 @@ impl Default for Config {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_reject_deprecated_nic_field() {
-        let json = r#"[{"cidr":"10.0.0.0/8","nic":"Ethernet"}]"#;
-        let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("deprecated"));
+    fn sample_rule() -> RoutingRule {
+        RoutingRule {
+            target: TargetKind::Cidr,
+            target_value: "10.0.0.0/8".to_string(),
+            destination: DestinationKind::Ip,
+            destination_value: "192.168.1.1".to_string(),
+        }
     }
 
     #[test]
-    fn test_reject_rule_without_rewrite_to() {
-        let json = r#"[{"cidr":"10.0.0.0/8"}]"#;
-        let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("rewrite-to"));
-    }
-
-    #[test]
-    fn test_reject_plain_ip() {
-        let json = r#"[{"cidr":"8.8.8.8","rewrite-to":"192.168.1.1"}]"#;
-        let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("CIDR"));
-    }
-
-    #[test]
-    fn test_reject_wildcard() {
-        let json = r#"[{"cidr":"*","rewrite-to":"192.168.1.1"}]"#;
-        let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("CIDR"));
-    }
-
-    #[test]
-    fn test_load_rewrite_to_mac() {
-        let json = r#"[{"cidr": "10.0.0.0/8", "rewrite-to": "AA:BB:CC:DD:EE:FF"}]"#;
+    fn test_load_new_format() {
+        let json = r#"[{
+            "target": "cidr",
+            "target-value": "10.0.0.0/8",
+            "destination": "ip",
+            "destination-value": "192.168.1.1"
+        }]"#;
         let config = Config::from_json_str(json).unwrap();
-        assert_eq!(config.rules[0].rewrite_to, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(config.rules[0].target, TargetKind::Cidr);
+        assert_eq!(config.rules[0].destination, DestinationKind::Ip);
     }
 
     #[test]
-    fn test_load_rewrite_to_nic() {
-        let json = r#"[{"cidr": "10.0.0.0/8", "rewrite-to": "Wi-Fi"}]"#;
-        let config = Config::from_json_str(json).unwrap();
-        assert_eq!(config.rules[0].rewrite_to, "Wi-Fi");
-    }
-
-    #[test]
-    fn test_load_rewrite_to_gateway() {
-        let json = r#"[{"cidr": "10.0.0.0/8", "rewrite-to": "192.168.1.1"}]"#;
-        let config = Config::from_json_str(json).unwrap();
-        assert_eq!(config.rules[0].rewrite_to, "192.168.1.1");
-    }
-
-    #[test]
-    fn test_reject_legacy_ip_or_cidr_field() {
-        let json = r#"[{"ip-or-cidr": "10.0.0.0/8", "rewrite-to": "192.168.1.1"}]"#;
+    fn test_reject_missing_fields() {
+        let json = r#"[{"target":"cidr","target-value":"10.0.0.0/8"}]"#;
         let err = Config::from_json_str(json).unwrap_err();
         assert!(err.to_string().contains("invalid routes JSON"));
     }
 
     #[test]
-    fn test_reject_legacy_ip_field() {
-        let json = r#"[{"ip": "10.0.0.0/8", "rewrite-to": "192.168.1.1"}]"#;
+    fn test_reject_plain_ip_as_cidr_target() {
+        let json = r#"[{
+            "target": "cidr",
+            "target-value": "8.8.8.8",
+            "destination": "ip",
+            "destination-value": "192.168.1.1"
+        }]"#;
         let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("invalid routes JSON"));
+        assert!(err.to_string().contains("prefix"));
     }
 
     #[test]
-    fn test_load_legacy_route_to_fields() {
-        let json = r#"[
-            {"cidr": "10.0.0.0/8", "route-to-mac-address": "AA:BB:CC:DD:EE:FF"},
-            {"cidr": "172.16.0.0/12", "route-to-nic-name": "Ethernet"},
-            {"cidr": "192.168.0.0/16", "route-to-default-gateway": "192.168.1.1"}
-        ]"#;
-        let config = Config::from_json_str(json).unwrap();
-        assert_eq!(config.rules[0].rewrite_to, "AA:BB:CC:DD:EE:FF");
-        assert_eq!(config.rules[1].rewrite_to, "Ethernet");
-        assert_eq!(config.rules[2].rewrite_to, "192.168.1.1");
-    }
-
-    #[test]
-    fn test_reject_duplicate_cidr_in_json() {
-        let json = r#"[
-            {"cidr": "10.0.0.0/8", "rewrite-to": "192.168.1.1"},
-            {"cidr": "10.0.0.0/8", "rewrite-to": "192.168.1.2"}
-        ]"#;
+    fn test_reject_cidr_as_ip_target() {
+        let json = r#"[{
+            "target": "ip",
+            "target-value": "8.8.8.8/32",
+            "destination": "ip",
+            "destination-value": "192.168.1.1"
+        }]"#;
         let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("duplicate CIDR"));
+        assert!(err.to_string().contains("plain IPv4"));
     }
 
     #[test]
-    fn test_reject_equivalent_cidr_in_json() {
+    fn test_reject_overlapping_cidr_targets() {
         let json = r#"[
-            {"cidr": "10.0.0.0/8", "rewrite-to": "192.168.1.1"},
-            {"cidr": "10.0.0.1/8", "rewrite-to": "192.168.1.2"}
-        ]"#;
-        let err = Config::from_json_str(json).unwrap_err();
-        assert!(err.to_string().contains("duplicate CIDR"));
-    }
-
-    #[test]
-    fn test_reject_overlapping_cidr_in_json() {
-        let json = r#"[
-            {"cidr": "10.0.0.0/8", "rewrite-to": "192.168.1.1"},
-            {"cidr": "10.1.0.0/16", "rewrite-to": "192.168.1.2"}
+            {
+                "target": "cidr",
+                "target-value": "10.0.0.0/8",
+                "destination": "ip",
+                "destination-value": "192.168.1.1"
+            },
+            {
+                "target": "cidr",
+                "target-value": "10.1.0.0/16",
+                "destination": "ip",
+                "destination-value": "192.168.1.2"
+            }
         ]"#;
         let err = Config::from_json_str(json).unwrap_err();
         assert!(err.to_string().contains("overlapping CIDR"));
-    }
-
-    #[test]
-    fn test_reject_overlapping_cidr_on_add_rule() {
-        let mut config = Config::new();
-        config
-            .add_rule("10.0.0.0/8".to_string(), "192.168.1.1".to_string())
-            .unwrap();
-        let err = config
-            .add_rule("10.1.0.0/16".to_string(), "192.168.1.2".to_string())
-            .unwrap_err();
-        assert!(err.to_string().contains("overlapping CIDR"));
-    }
-
-    #[test]
-    fn test_classify_rewrite_target() {
-        assert_eq!(
-            classify_rewrite_target("192.168.1.1").unwrap(),
-            RewriteTargetKind::Gateway("192.168.1.1".into())
-        );
-        assert_eq!(
-            classify_rewrite_target("AA-BB-CC-DD-EE-FF").unwrap(),
-            RewriteTargetKind::Mac("AA:BB:CC:DD:EE:FF".into())
-        );
-        assert_eq!(
-            classify_rewrite_target("Ethernet").unwrap(),
-            RewriteTargetKind::Nic("Ethernet".into())
-        );
     }
 
     fn make_entry(if_index: u32, gw: Ipv4Addr) -> MacEntry {
-        MacEntry { if_index, gateway: gw, egress_ipv4: None }
+        MacEntry {
+            if_index,
+            gateway: gw,
+            egress_ipv4: None,
+        }
     }
 
     #[test]
-    fn test_compile_mac_target() {
+    fn test_compile_mac_destination() {
         let mut config = Config::new();
-        config
-            .add_rule("10.0.0.0/8".to_string(), "AA:BB:CC:DD:EE:FF".to_string())
-            .unwrap();
+        config.add_rule(sample_rule()).unwrap();
         let mut mac_map = HashMap::new();
-        mac_map.insert("AA:BB:CC:DD:EE:FF".to_string(), make_entry(42, Ipv4Addr::new(10, 0, 0, 1)));
-        let compiled = config.compile_rules(&mac_map, &HashMap::new(), &HashMap::new()).unwrap();
+        mac_map.insert(
+            "AA:BB:CC:DD:EE:FF".to_string(),
+            make_entry(42, Ipv4Addr::new(10, 0, 0, 1)),
+        );
+        let mut gw_map = HashMap::new();
+        gw_map.insert(Ipv4Addr::new(192, 168, 1, 1), make_entry(42, Ipv4Addr::new(192, 168, 1, 1)));
+        let compiled = config
+            .compile_rules(&mac_map, &HashMap::new(), &gw_map)
+            .unwrap();
         assert_eq!(compiled[0].if_index, 42);
     }
 
     #[test]
-    fn test_compile_nic_target() {
+    fn test_compile_nic_destination() {
         let mut config = Config::new();
         config
-            .add_rule("10.0.0.0/8".to_string(), "Ethernet".to_string())
+            .add_rule(RoutingRule {
+                target: TargetKind::Cidr,
+                target_value: "10.0.0.0/8".to_string(),
+                destination: DestinationKind::Nic,
+                destination_value: "Ethernet".to_string(),
+            })
             .unwrap();
         let mut nic_map = HashMap::new();
-        nic_map.insert("ethernet".to_string(), make_entry(9, Ipv4Addr::new(10, 0, 0, 1)));
-        let compiled = config.compile_rules(&HashMap::new(), &nic_map, &HashMap::new()).unwrap();
+        nic_map.insert(
+            "ethernet".to_string(),
+            make_entry(9, Ipv4Addr::new(10, 0, 0, 1)),
+        );
+        let compiled = config
+            .compile_rules(&HashMap::new(), &nic_map, &HashMap::new())
+            .unwrap();
         assert_eq!(compiled[0].if_index, 9);
     }
 
     #[test]
-    fn test_compile_gateway_target() {
+    fn test_find_compiled_cidr() {
         let mut config = Config::new();
         config
-            .add_rule("10.0.0.0/8".to_string(), "192.168.1.1".to_string())
+            .add_rule(RoutingRule {
+                target: TargetKind::Cidr,
+                target_value: "192.168.1.0/24".to_string(),
+                destination: DestinationKind::Mac,
+                destination_value: "AA:BB:CC:DD:EE:01".to_string(),
+            })
             .unwrap();
-        let mut gw_map = HashMap::new();
-        gw_map.insert(Ipv4Addr::new(192, 168, 1, 1), make_entry(5, Ipv4Addr::new(192, 168, 1, 1)));
-        let compiled = config.compile_rules(&HashMap::new(), &HashMap::new(), &gw_map).unwrap();
-        assert_eq!(compiled[0].if_index, 5);
+        let mut mac_map = HashMap::new();
+        mac_map.insert(
+            "AA:BB:CC:DD:EE:01".to_string(),
+            make_entry(1, Ipv4Addr::new(10, 0, 0, 1)),
+        );
+        let compiled = config
+            .compile_rules(&mac_map, &HashMap::new(), &HashMap::new())
+            .unwrap();
+        let hit = Config::find_compiled(&compiled, Ipv4Addr::new(192, 168, 1, 50), 0);
+        assert!(hit.is_some());
+        assert_eq!(hit.unwrap().if_index, 1);
     }
 
     #[test]
-    fn test_find_compiled() {
+    fn test_find_compiled_interface_target() {
         let mut config = Config::new();
         config
-            .add_rule("192.168.1.0/24".to_string(), "AA:BB:CC:DD:EE:01".to_string())
+            .add_rule(RoutingRule {
+                target: TargetKind::Nic,
+                target_value: "Wi-Fi".to_string(),
+                destination: DestinationKind::Mac,
+                destination_value: "AA:BB:CC:DD:EE:01".to_string(),
+            })
             .unwrap();
+        let mut nic_map = HashMap::new();
+        nic_map.insert("wi-fi".to_string(), make_entry(7, Ipv4Addr::new(10, 0, 0, 1)));
         let mut mac_map = HashMap::new();
-        mac_map.insert("AA:BB:CC:DD:EE:01".to_string(), make_entry(1, Ipv4Addr::new(10, 0, 0, 1)));
-        let compiled = config.compile_rules(&mac_map, &HashMap::new(), &HashMap::new()).unwrap();
-        let hit = Config::find_compiled(&compiled, Ipv4Addr::new(192, 168, 1, 50));
+        mac_map.insert(
+            "AA:BB:CC:DD:EE:01".to_string(),
+            make_entry(1, Ipv4Addr::new(10, 0, 0, 1)),
+        );
+        let compiled = config
+            .compile_rules(&mac_map, &nic_map, &HashMap::new())
+            .unwrap();
+        let hit = Config::find_compiled(&compiled, Ipv4Addr::new(1, 2, 3, 4), 7);
         assert!(hit.is_some());
-        assert_eq!(hit.unwrap().if_index, 1);
+        let miss = Config::find_compiled(&compiled, Ipv4Addr::new(1, 2, 3, 4), 3);
+        assert!(miss.is_none());
     }
 }

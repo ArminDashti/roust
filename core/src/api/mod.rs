@@ -1,6 +1,6 @@
 //! Shared application logic for the GUI frontend.
 
-use crate::config::{classify_rewrite_target, Config, RewriteTargetKind, RoutingRule};
+use crate::config::{Config, DestinationKind, RoutingRule, TargetKind};
 use crate::network::{build_adapter_maps, enumerate_interfaces, predict_ipv4_egress, EgressPrediction};
 use std::net::Ipv4Addr;
 use crate::service;
@@ -99,39 +99,18 @@ fn predict_result_from_egress(p: &EgressPrediction) -> PredictResult {
     }
 }
 
-/// Validate that `rewrite-to` exists on a local adapter.
-fn validate_rewrite_to(rewrite_to: &str) -> Result<()> {
+fn validate_rule_on_host(rule: &RoutingRule) -> Result<()> {
+    rule.validate()?;
     let interfaces = enumerate_interfaces()?;
     let (mac_map, nic_map, gw_map) = build_adapter_maps(&interfaces);
-    match classify_rewrite_target(rewrite_to)? {
-        RewriteTargetKind::Mac(mac) => {
-            if !mac_map.contains_key(&mac) {
-                return Err(anyhow!(
-                    "MAC '{mac}' not found on any local interface \
-                     (see Adapters in the Roust app)"
-                ));
-            }
-        }
-        RewriteTargetKind::Nic(nic) => {
-            if !nic_map.contains_key(&nic.to_ascii_lowercase()) {
-                return Err(anyhow!(
-                    "NIC name '{nic}' not found on any local interface \
-                     (see Adapters in the Roust app)"
-                ));
-            }
-        }
-        RewriteTargetKind::Gateway(gateway) => {
-            let gw: Ipv4Addr = gateway
-                .parse()
-                .map_err(|_| anyhow!("invalid gateway IP '{gateway}'"))?;
-            if !gw_map.contains_key(&gw) {
-                return Err(anyhow!(
-                    "gateway '{gateway}' is not a default gateway on any local interface \
-                     (see Adapters in the Roust app)"
-                ));
-            }
-        }
-    }
+    Config::compile_rules(
+        &Config {
+            rules: vec![rule.clone()],
+        },
+        &mac_map,
+        &nic_map,
+        &gw_map,
+    )?;
     Ok(())
 }
 
@@ -145,12 +124,20 @@ fn live_apply_hint() -> Option<String> {
 
 pub fn add_rule(
     config_path: &Path,
-    cidr: String,
-    rewrite_to: String,
+    target: TargetKind,
+    target_value: String,
+    destination: DestinationKind,
+    destination_value: String,
 ) -> Result<RuleMutationResult> {
-    validate_rewrite_to(&rewrite_to)?;
+    let rule = RoutingRule {
+        target,
+        target_value: target_value.trim().to_string(),
+        destination,
+        destination_value: destination_value.trim().to_string(),
+    };
+    validate_rule_on_host(&rule)?;
     let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
-    config.add_rule(cidr, rewrite_to)?;
+    config.add_rule(rule)?;
     config.save(config_path)?;
     Ok(RuleMutationResult {
         message: "Rule added successfully.".into(),
@@ -161,30 +148,16 @@ pub fn add_rule(
 pub fn import_rules_from_file(
     config_path: &Path,
     file_path: &Path,
-    default_rewrite_to: Option<String>,
 ) -> Result<RuleMutationResult> {
     let content = fs::read_to_string(file_path)?;
     let imported = Config::parse_import_file(&content, file_path)?;
     let mut config = Config::load(config_path).unwrap_or_else(|_| Config::new());
 
     for rule in imported {
-        let rewrite_to = if rule.rewrite_to.is_empty() {
-            default_rewrite_to
-                .clone()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "entry {} in {} needs \"rewrite-to\" or a default rewrite target",
-                        rule.cidr,
-                        file_path.display()
-                    )
-                })?
-        } else {
-            rule.rewrite_to
-        };
-        validate_rewrite_to(&rewrite_to).map_err(|e| {
-            anyhow!("entry {} in {}: {e}", rule.cidr, file_path.display())
+        validate_rule_on_host(&rule).map_err(|e| {
+            anyhow!("entry {} in {}: {e}", rule.label(), file_path.display())
         })?;
-        config.add_rule(rule.cidr, rewrite_to)?;
+        config.add_rule(rule)?;
     }
 
     config.save(config_path)?;
@@ -194,9 +167,9 @@ pub fn import_rules_from_file(
     })
 }
 
-pub fn delete_rule(config_path: &Path, cidr: &str) -> Result<RuleMutationResult> {
+pub fn delete_rule(config_path: &Path, index: usize) -> Result<RuleMutationResult> {
     let mut config = Config::load(config_path)?;
-    if config.remove_rule(cidr) {
+    if config.remove_rule_at(index) {
         config.save(config_path)?;
         Ok(RuleMutationResult {
             message: "Rule deleted successfully.".into(),
@@ -212,13 +185,21 @@ pub fn delete_rule(config_path: &Path, cidr: &str) -> Result<RuleMutationResult>
 
 pub fn edit_rule(
     config_path: &Path,
-    cidr: String,
-    rewrite_to: String,
+    index: usize,
+    target: TargetKind,
+    target_value: String,
+    destination: DestinationKind,
+    destination_value: String,
 ) -> Result<RuleMutationResult> {
-    validate_rewrite_to(&rewrite_to)?;
+    let rule = RoutingRule {
+        target,
+        target_value: target_value.trim().to_string(),
+        destination,
+        destination_value: destination_value.trim().to_string(),
+    };
+    validate_rule_on_host(&rule)?;
     let mut config = Config::load(config_path)?;
-    config.remove_rule(&cidr);
-    config.add_rule(cidr, rewrite_to)?;
+    config.replace_rule_at(index, rule)?;
     config.save(config_path)?;
     Ok(RuleMutationResult {
         message: "Rule updated successfully.".into(),
