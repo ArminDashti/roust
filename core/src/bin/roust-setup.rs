@@ -2,7 +2,18 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use roust::setup::{self, SetupOptions};
 use std::env;
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
+
+fn wait_for_interactive_exit() {
+    if io::stderr().is_terminal() {
+        let _ = writeln!(io::stderr());
+        let _ = writeln!(io::stderr(), "Press Enter to exit...");
+        let _ = io::stderr().flush();
+        let mut line = String::new();
+        let _ = io::stdin().read_line(&mut line);
+    }
+}
 #[derive(Parser)]
 #[command(name = "roust-setup")]
 #[command(about = "Configure roust after install (WinDivert, IP lists, PATH)")]
@@ -51,5 +62,9 @@ fn main() -> Result<()> {
     if cli.skip_windivert {
         options.download_windivert = false;
     }
-    setup::run(&options)
+    let result = setup::run(&options);
+    if result.is_ok() {
+        wait_for_interactive_exit();
+    }
+    result
 }
