@@ -1,12 +1,12 @@
 services:
   build:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: scripts/Dockerfile
       target: artifacts
     image: roust:build
     volumes:
-      - ./dist:/export
+      - ../dist:/export
     entrypoint:
       - sh
       - -c
