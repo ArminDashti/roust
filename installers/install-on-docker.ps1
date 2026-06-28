@@ -269,7 +269,7 @@ if ($LASTEXITCODE -ne 0) {
     try {
         Start-Service -Name 'Roust' -ErrorAction Stop
     } catch {
-        Write-Warning 'Service start failed. After fixing config, start it from the Roust app or run: Start-Service Roust'
+        Write-Warning 'Service start failed. After fixing config, start it from roust-setup.exe or run: Start-Service Roust'
     }
 }
 

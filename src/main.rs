@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     }
 
     eprintln!(
-        "roust runs as a Windows service. Use the Roust app to manage rules and service state."
+        "roust runs as a Windows service. Use roust-setup.exe to manage rules and service state."
     );
     eprintln!("Installer flags: --install-service, --uninstall-service");
     wait_for_interactive_exit();

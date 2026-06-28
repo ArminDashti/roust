@@ -14,7 +14,7 @@
   8. Copies WinDivert runtime files (WinDivert.dll, WinDivert64.sys) beside roust.exe.
 
   Default install folder: <current directory>\Roust
-  Custom install folder:   .\installer.ps1 --path=C:\path\to\folder
+  Custom install folder:   .\install-on-windows.ps1 --path=C:\path\to\folder
 #>
 param(
     [string]$InstallDir,
@@ -49,12 +49,12 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 
-# App root is the folder that contains this script; the Rust crate lives in core/.
+# App root is the folder that contains this script; the Rust crate lives in the current directory.
 $AppRoot = $PSScriptRoot
 if (-not $AppRoot) {
     $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
-$CoreRoot = Join-Path $AppRoot 'core'
+$CoreRoot = Join-Path $AppRoot '..'
 if (-not (Test-Path -LiteralPath $CoreRoot)) {
     throw "Expected Rust project at $CoreRoot"
 }
@@ -64,7 +64,7 @@ $ExeName = 'roust.exe'
 $BuiltExe = Join-Path $CoreRoot 'target\release\roust.exe'
 $InstallExe = Join-Path $InstallDir $ExeName
 $InstallRoutes = Join-Path $InstallDir 'routes.json'
-$SourceRoutes = Join-Path $CoreRoot 'routes.json'
+$SourceRoutes = Join-Path $AppRoot '..\routes.json'
 
 . (Join-Path $AppRoot 'msvc-env.ps1')
 
@@ -178,7 +178,7 @@ function Add-InstallDirToUserPath {
 
 function Install-WinDivertRuntime {
     # roust.exe loads WinDivert.dll from its own directory at runtime.
-    $windivertDir = Join-Path $CoreRoot 'WinDivert-2.2.2-A\x64'
+    $windivertDir = Join-Path $AppRoot '..\WinDivert-2.2.2-A\x64'
     $required = @('WinDivert.dll', 'WinDivert64.sys')
     foreach ($name in $required) {
         $source = Join-Path $windivertDir $name
@@ -263,7 +263,7 @@ if ($LASTEXITCODE -ne 0) {
     try {
         Start-Service -Name 'Roust' -ErrorAction Stop
     } catch {
-        Write-Warning 'Service start failed. After fixing config, start it from the Roust app or run: Start-Service Roust'
+        Write-Warning 'Service start failed. After fixing config, start it from roust-setup.exe or run: Start-Service Roust'
     }
 }
 
