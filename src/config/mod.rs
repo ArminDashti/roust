@@ -444,8 +444,7 @@ impl Config {
                 let mac = normalize_mac(trimmed);
                 let entry = mac_map.get(&mac).ok_or_else(|| {
                     anyhow!(
-                        "target MAC {mac} not found on any local interface \
-                         (see Gateways in the Roust app)"
+                        "target MAC {mac} not found on any local interface"
                     )
                 })?;
                 Ok(MatchPattern::Interface(entry.if_index))
@@ -453,8 +452,7 @@ impl Config {
             TargetKind::Nic => {
                 let entry = nic_map.get(&trimmed.to_ascii_lowercase()).ok_or_else(|| {
                     anyhow!(
-                        "target NIC \"{trimmed}\" not found on any local interface \
-                         (see Gateways in the Roust app)"
+                        "target NIC \"{trimmed}\" not found on any local interface"
                     )
                 })?;
                 Ok(MatchPattern::Interface(entry.if_index))

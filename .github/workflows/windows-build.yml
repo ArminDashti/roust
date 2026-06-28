@@ -18,20 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build release binaries
-        working-directory: core
         run: cargo build --release --bins
-
-      - name: Stage installer payload
-        shell: pwsh
-        working-directory: core
-        run: ./installer/stage.ps1
-
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
-
-      - name: Compile setup wizard
-        working-directory: core
-        run: iscc installer\roust.iss
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -39,12 +26,5 @@ jobs:
           name: roust-windows-x86_64
           if-no-files-found: error
           path: |
-            core/target/release/roust.exe
-            core/target/release/roust-setup.exe
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: roust-installer-x86_64
-          if-no-files-found: error
-          path: core/installer/output/*.exe
+            target/release/roust.exe
+            target/release/roust-setup.exe

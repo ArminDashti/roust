@@ -255,7 +255,7 @@ pub fn install(auto_start: bool) -> Result<()> {
         exe_path.display(),
         RUN_AS_SERVICE_FLAG
     );
-    println!("  Start the service from the Roust app.");
+    println!("  Start the service from roust-setup.exe.");
     Ok(())
 }
 
@@ -286,7 +286,7 @@ pub fn start() -> Result<()> {
 fn start_service() -> Result<()> {
     if !is_installed()? {
         return Err(anyhow!(
-            "Windows service \"{SERVICE_NAME}\" is not installed. Re-run installer.ps1 as Administrator or run `roust --install-service`."
+            "Windows service \"{SERVICE_NAME}\" is not installed. Re-run install-on-windows.ps1 as Administrator or run `roust --install-service`."
         ));
     }
     let manager = open_service_manager(ServiceManagerAccess::CONNECT)?;
@@ -410,7 +410,7 @@ pub fn stop() -> Result<()> {
 pub fn restart() -> Result<()> {
     if !is_installed()? {
         return Err(anyhow!(
-            "Windows service \"{SERVICE_NAME}\" is not installed. Re-run installer.ps1 as Administrator or run `roust --install-service`."
+            "Windows service \"{SERVICE_NAME}\" is not installed. Re-run install-on-windows.ps1 as Administrator or run `roust --install-service`."
         ));
     }
 

@@ -25,7 +25,7 @@ fn main() {
         eprintln!("Download WinDivert from: https://www.reqrypt.org/windivert.html");
         eprintln!("Extract it, then either:");
         eprintln!(
-            "  - Rename the folder to WinDivert-2.2.2-A and place it in the core/ directory, or"
+            "  - Rename the folder to WinDivert-2.2.2-A and place it in the project root, or"
         );
         eprintln!(
             "  - Set ROUST_WINDIVERT_SDK to the full path of that folder before running cargo."

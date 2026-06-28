@@ -1,8 +1,8 @@
 # roust
 
-Windows packet router with rule-based routing by interface default gateway for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (Windows service daemon) and `roust-setup.exe` (first-run setup CLI). Manage rules and service state with the **Roust** desktop app (Tauri GUI in `gui/`).
+Windows packet router with rule-based routing by interface default gateway for inbound and outbound IPv4 (WinDivert). Release binaries are `roust.exe` (Windows service daemon) and `roust-setup.exe` (first-run setup CLI).
 
-**Technical overview:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — architecture, packet flow, config, GUI API, and setup.
+**Technical overview:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — architecture, packet flow, config, and setup.
 
 ## Install (Windows)
 
@@ -10,7 +10,7 @@ Windows packet router with rule-based routing by interface default gateway for i
 
 1. Download **roust-setup-0.1.0-x64.exe** from the latest [GitHub Actions](https://github.com/ArminDashti/roust/actions) Windows build (artifact `roust-installer-x86_64`).
 2. Run the installer (administrator rights are required for WinDivert).
-3. Open the **Roust** app to add rules, predict egress, and start or stop the Windows service.
+3. Use `roust-setup.exe` to add rules, predict egress, and start or stop the Windows service.
 
 The wizard installs to `C:\Program Files\roust`, bundles WinDivert, downloads Iran/private IP lists, adds that folder to your **user** PATH, and registers a **Windows service** so the router can run in the background.
 
@@ -21,7 +21,6 @@ Service logs: `logs\roust-service.log` in the install directory.
 Build release binaries, then run the console helper next to them:
 
 ```powershell
-cd core
 cargo build --release --bins
 .\target\release\roust-setup.exe
 ```
@@ -34,7 +33,7 @@ Register the service after install (elevated PowerShell):
 .\target\release\roust.exe --install-service
 ```
 
-Use the Roust app or `installer.ps1` for day-to-day rule and service management.
+Use `roust-setup.exe` for day-to-day rule and service management.
 
 ## Uninstall
 
@@ -48,7 +47,7 @@ You need a **64-bit Windows** machine (or VM) with the **MSVC** Rust toolchain s
 
 1. **Rust (stable), MSVC target** — Install from [https://rustup.rs](https://rustup.rs) and choose the default **`x86_64-pc-windows-msvc`** profile for 64-bit Intel/AMD Windows. The vendored WinDivert SDK in this repo ships `x64` and `x86` import libraries used by the build.
 2. **Visual Studio Build Tools** (or full Visual Studio) with the **Desktop development with C++** workload so `link.exe` and the Universal CRT libraries are available.
-3. **This repository** — Clone it and `cd` into `core/`. A WinDivert 2.2.2 SDK tree is already included as `WinDivert-2.2.2-A/` (headers and `x64` / `x86` import libraries).
+3. **This repository** — Clone it. A WinDivert 2.2.2 SDK tree is already included as `WinDivert-2.2.2-A/` (headers and `x64` / `x86` import libraries).
 
 ### Optional: WinDivert folder somewhere else
 
@@ -56,23 +55,20 @@ If your WinDivert SDK lives outside the repo, set **`ROUST_WINDIVERT_SDK`** to t
 
 ### Compile release executables
 
-From the `core/` directory:
-
 ```powershell
-cd core
 cargo build --release --bins
 ```
 
 Artifacts:
 
-- `core/target/release/roust.exe` — Windows service daemon (SCM + packet router)
-- `core/target/release/roust-setup.exe` — downloads WinDivert beside the install if missing and can help with PATH setup
+- `target/release/roust.exe` — Windows service daemon (SCM + packet router)
+- `target/release/roust-setup.exe` — downloads WinDivert beside the install if missing and can help with PATH setup
 
 Debug builds use the same paths under `target/debug/`.
 
 ### After building
 
-Copy `WinDivert-2.2.2-A\x64\WinDivert.dll` (and driver files as required by WinDivert) next to `roust.exe`, or run **`roust-setup.exe`** once from the folder where you want the install so it can lay down WinDivert and list files. See WinDivert licensing in `WinDivert-2.2.2-A/LICENSE`.
+Copy `WinDivert-2.2.2-A\x64\WinDivert.dll` (and driver files as required by WinDivert) next to `roust.exe`, or run `roust-setup.exe` once from the folder where you want the install so it can lay down WinDivert and list files. See WinDivert licensing in `WinDivert-2.2.2-A/LICENSE`.
 
 ### CI reference
 
@@ -80,7 +76,7 @@ GitHub Actions builds the same way on `windows-latest`; see `.github/workflows/w
 
 ### Docker build (Linux / macOS / Windows with Docker Desktop)
 
-From the **repository root** (not `core/`), cross-compile release Windows binaries inside a container. The image uses [cargo-xwin](https://github.com/rust-cross/cargo-xwin) and downloads the WinDivert SDK when import libraries are missing from the checkout.
+Cross-compile release Windows binaries inside a container. The image uses [cargo-xwin](https://github.com/rust-cross/cargo-xwin) and downloads the WinDivert SDK when import libraries are missing from the checkout.
 
 ```bash
 docker compose run --rm build
@@ -104,7 +100,6 @@ docker compose build --build-arg WINDIVERT_ZIP_URL=https://example.com/WinDivert
 The build script rejects non-Windows host targets. From Linux or macOS you can still produce `.exe` files by cross-compiling, for example:
 
 ```bash
-cd core
 rustup target add x86_64-pc-windows-msvc
 cargo xwin build --release --bins --target x86_64-pc-windows-msvc
 ```
