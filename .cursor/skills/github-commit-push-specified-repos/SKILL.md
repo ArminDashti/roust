@@ -1,12 +1,6 @@
 ---
-name: github-commit-push-all-repos
-description: >-
-  Windows 11 only. Discovers Git repos under paths listed in markdown files,
-  verifies each exists on GitHub, commits and pushes with short messages.
-  Creates .gitignore and .gitkeep for empty folders; handles UTF-8 and CRLF.
-  Auto-resolves simple conflicts; asks the user on critical conflicts. Never
-  blocks on one repo. Reads GITHUB_TOKEN_PAT from User environment variables.
-  Config in config.json. Use for batch commit/push all repos.
+name: github-commit-push-specified-repos
+description: Windows 11 only. Discovers Git repos under paths listed in markdown files, verifies each exists on GitHub, commits and pushes with short messages. Creates .gitignore and .gitkeep for empty folders; handles UTF-8 and CRLF. Auto-resolves simple conflicts; asks the user on critical conflicts. Never blocks on one repo. Reads GITHUB_TOKEN_PAT from User environment variables. Config in config.json. Use for batch commit/push all repos.
 ---
 
 # GitHub Commit Push All Repos

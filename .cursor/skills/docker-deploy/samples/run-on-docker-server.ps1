@@ -3,7 +3,7 @@
   Deploy stack to a remote host over SSH using sibling YAML only.
 
 .DESCRIPTION
-  Sample for .deploy/docker/run-on-docker-server.ps1.
+  Sample for .armin/docker-scripts/run-on-docker-server.ps1.
   Reads run-on-docker-server.yaml — no CLI -- flags.
   Flow when build_image_on is local: build locally → docker save → SCP → remote docker load → sync files → remote compose up -d.
   Flow when build_image_on is server: sync repo to remote → remote docker build → remote compose up -d.
@@ -32,15 +32,15 @@ function Show-Help {
 run-on-docker-server.ps1 — remote Docker deploy (YAML-only)
 
 USAGE:
-  .\.deploy\docker\run-on-docker-server.ps1
+  .\.armin\docker-scripts\run-on-docker-server.ps1
 
 CONFIG:
   Sibling file: run-on-docker-server.yaml
 
   stack_name          Compose project name (-p)
   image_tag           Image tag for build and compose; overrides compose when set
-  compose_file        Compose path relative to .deploy/docker
-  dockerfile          Dockerfile path relative to .deploy/docker
+  compose_file        Compose path relative to .armin/docker-scripts
+  dockerfile          Dockerfile path relative to .armin/docker-scripts
   docker_network      External Docker network on remote
   publish_port        Optional host bind port; omit or empty = no host bind
   internal_port       Container listen port; overrides compose when set

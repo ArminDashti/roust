@@ -1,4 +1,4 @@
-# Local deploy settings — copy to .deploy/docker/ and adapt.
+# Local deploy settings — copy to .armin/docker-scripts/ and adapt.
 # Scripts read this file only (no CLI -- flags).
 # Non-empty override fields replace values from compose_file / dockerfile.
 
