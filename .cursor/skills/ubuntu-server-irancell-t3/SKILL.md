@@ -42,7 +42,7 @@ Host t3
     IdentitiesOnly yes
 ```
 
-Then: `ssh t3`
+Prefer: `ssh t3 -p 80` (SSH on port 80). Fallback: `ssh t3` (config Port 22).
 
 ### 3. Verify connectivity
 
