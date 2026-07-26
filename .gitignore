@@ -1,3 +1,6 @@
+*.exe
+*.EXE
+
 # Logs
 logs
 *.log
@@ -17,3 +20,6 @@ target/
 *.sln
 *.sw?
 /assets
+
+# --- auto: github-commit-push-all-repos ---
+# --- end auto ---

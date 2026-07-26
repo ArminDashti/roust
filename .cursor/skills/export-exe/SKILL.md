@@ -3,6 +3,7 @@ name: export-exe
 description: >-
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   Creates a repo-root export-exe.ps1 that stops all app processes and services,
   builds a Windows .exe, installs binary plus deps into ./release, then runs the
   installed app. Supports Go, C#, Python, Tauri, Node, and similar stacks. Use
@@ -10,14 +11,19 @@ description: >-
 =======
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
   Creates a repo-root install.ps1 that stops any running app/service process,
   builds a Windows .exe, copies binary plus deps into ./release, then launches
   the exported app. Supports Go, C#, Python, Tauri, Node, and similar stacks.
   Use when the user asks to export an exe, create install.ps1, build a release
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
   folder, or package a desktop/CLI app for Windows.
 ---
 
@@ -25,6 +31,7 @@ description: >-
 
 ## Overview
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 - Owns create / edit of repo-root `export-exe.ps1` that **stops** all matching app processes and Windows services, builds a Windows `.exe`, **installs** it (plus deps) to `./release`, then **runs** the installed app
@@ -37,11 +44,16 @@ description: >-
 - Owns create / edit of repo-root `install.ps1` that **stops** the running app or Windows service, builds a Windows `.exe`, exports it (plus deps) to `./release`, then **runs** the exported app
 - Base the script on [samples/install.ps1](samples/install.ps1); fill build/copy steps from [reference.md](reference.md)
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+- Owns create / edit of repo-root `install.ps1` that **stops** the running app or Windows service, builds a Windows `.exe`, exports it (plus deps) to `./release`, then **runs** the exported app
+- Base the script on [samples/install.ps1](samples/install.ps1); fill build/copy steps from [reference.md](reference.md)
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 - Exclusions: signing/notarization, MSI/NSIS installers (unless user asks), Linux/macOS binaries, app source changes unrelated to packaging
 
 ## Objectives
 
 1. Detect the project stack and app name
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 2. Write `export-exe.ps1` at the **repo root** (Netvan-style CLI + logging)
@@ -52,15 +64,20 @@ description: >-
 =======
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 2. Write `install.ps1` at the repo root (Netvan-style CLI + logging)
 3. Script **stops** matching process(es) / service before build so files are not locked
 4. Script builds release `.exe`, then copies exe + required runtime files into `./release`
 5. Script **starts** the exported app from `./release` after a successful export
 6. Optionally run `.\install.ps1` when the user asks to build now
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 
 ## Workflow
 
@@ -79,6 +96,7 @@ Confirm app display name, primary exe name, and (if any) Windows service name wi
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### Step 2: Create `export-exe.ps1` at repo root
 
 1. Copy [samples/export-exe.ps1](samples/export-exe.ps1) into the **target repo root** as `export-exe.ps1`
@@ -92,12 +110,18 @@ Confirm app display name, primary exe name, and (if any) Windows service name wi
 
 1. Copy [samples/install.ps1](samples/install.ps1) into the **target repo root** as `install.ps1`
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+### Step 2: Create `install.ps1`
+
+1. Copy [samples/install.ps1](samples/install.ps1) into the **target repo root** as `install.ps1`
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 2. Replace placeholders (`APP_NAME`, `APP_EXE`, `APP_SERVICE`, build commands, copy sources) using the matching recipe in [reference.md](reference.md)
 3. Keep the sample contract:
    - `#Requires -Version 5.1`
    - Logging helpers: `Write-Info`, `Write-Ok`, `Write-Warn`, `Write-Err`, `Write-Step`
    - Flags: `--out=<path>` (default `.\release`), `--help`, `--skip-stop`, `--skip-run`, plus stack-specific skips if useful (`--skip-restore`, `--skip-npm`, …)
    - `Assert-Command` for required tools before build
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
    - Fixed order: **stop** all app processes/service → build → **install** into `$OutDir` → **run** installed exe
@@ -122,6 +146,8 @@ After a successful build, **install** everything needed to run the exe offline o
 =======
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
    - **Stop** running app/service → build → copy to `$OutDir` → **run** exported exe
    - Create `$OutDir`, copy `.exe` + necessary files, print summary paths
 4. Do **not** execute the skill sample in place — only the project copy
@@ -141,15 +167,19 @@ Do this **before** build and copy so locked `.exe` / DLLs do not break export.
 
 Copy everything needed to run the exe offline on a typical Windows machine:
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 
 | Stack | Typical extras besides `.exe` |
 |-------|-------------------------------|
 | Go / Rust (static) | Often exe only |
 | .NET (self-contained) | Framework-dependent: runtime DLLs; self-contained single-file: exe (+ `.pdb` optional) |
 | Python (PyInstaller) | Entire `_internal/` folder if onedir; one-file: exe only |
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 | Tauri | Main exe only when built with **MSVC** (WebView2Loader statically embedded). GNU builds need `WebView2Loader.dll` beside the exe — prefer MSVC. Optional sidecar/service exes; leave installers under `target/release/bundle` |
@@ -159,10 +189,14 @@ Copy everything needed to run the exe offline on a typical Windows machine:
 =======
 | Tauri | Main exe; optional sidecar/service exes; leave installers under `target/release/bundle` (do not require copying bundles into `./release` unless asked) |
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+| Tauri | Main exe; optional sidecar/service exes; leave installers under `target/release/bundle` (do not require copying bundles into `./release` unless asked) |
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 | Electron | Full `dist` / `win-unpacked` contents |
 
 Never leave `./release` with only the exe when satellite DLLs, `_internal`, or config files are required at runtime.
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 ### Step 5: Run after install
@@ -174,6 +208,8 @@ Never leave `./release` with only the exe when satellite DLLs, `_internal`, or c
 =======
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 ### Step 5: Run after export
 
 **Always** launch the exported app after a successful copy (unless `--skip-run`):
@@ -181,15 +217,19 @@ Never leave `./release` with only the exe when satellite DLLs, `_internal`, or c
 1. Resolve `$ReleasedExe = Join-Path $OutDir "APP_EXE"` (must exist)
 2. If the project is a Windows service → `Start-Service` for `APP_SERVICE` (after copy), not a detached GUI start
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 3. Else `Start-Process -FilePath $ReleasedExe -WorkingDirectory $OutDir`
 4. Log the started path; do not wait for the app to exit (non-blocking)
 
 ### Step 6: Verify (when user wants a build)
 
 ```powershell
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 .\export-exe.ps1
@@ -203,6 +243,8 @@ Confirm `./release` contains the exe and required companions, that all prior app
 =======
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 .\install.ps1
 .\install.ps1 --out=.\release
 .\install.ps1 --skip-stop
@@ -212,13 +254,17 @@ Confirm `./release` contains the exe and required companions, that all prior app
 
 Confirm `./release` contains the exe and required companions, that any prior process was stopped, and that the app started from `./release`. Fix build errors before declaring done.
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 
 ## Safety rules
 
 1. **Never** invent absolute paths to toolchains or secrets; use `Get-Command` / PATH.
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 2. **Never** force-overwrite user customizations in an existing `export-exe.ps1` without reading it first and preserving intentional flags.
@@ -228,10 +274,14 @@ Confirm `./release` contains the exe and required companions, that any prior pro
 =======
 2. **Never** force-overwrite user customizations in an existing `install.ps1` without reading it first and preserving intentional flags.
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+2. **Never** force-overwrite user customizations in an existing `install.ps1` without reading it first and preserving intentional flags.
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 3. **Never** commit build artifacts under `./release` unless the user asks.
 4. **Always** default `--out` to `.\release` relative to the script root.
 5. **Always** fail fast (`$ErrorActionPreference = "Stop"`) and non-zero exit on missing tools or missing built exe.
 6. **Never** execute scripts from `.cursor/skills/export-exe/samples/` — copy into the target repo first.
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 7. **Always** stop all matching app processes and the app service before build/export (unless `--skip-stop`).
@@ -248,11 +298,17 @@ Confirm `./release` contains the exe and required companions, that any prior pro
 8. **Always** run the exported app from `$OutDir` after a successful export (unless `--skip-run`).
 9. **Never** kill unrelated processes — match by `APP_EXE` base name and optional `APP_SERVICE` only.
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+7. **Always** stop matching app/service processes before build/export (unless `--skip-stop`).
+8. **Always** run the exported app from `$OutDir` after a successful export (unless `--skip-run`).
+9. **Never** kill unrelated processes — match by `APP_EXE` base name and optional `APP_SERVICE` only.
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 
 ## Key facts & reference
 
 | Item | Value |
 |------|-------|
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 | Script path | `export-exe.ps1` (repo root) |
@@ -266,6 +322,8 @@ Confirm `./release` contains the exe and required companions, that any prior pro
 =======
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 | Script path | `install.ps1` (repo root) |
 | Default out | `./release` |
 | Sample | [samples/install.ps1](samples/install.ps1) |
@@ -274,9 +332,12 @@ Confirm `./release` contains the exe and required companions, that any prior pro
 | Supported stacks | Go, C#/.NET, Python, Tauri, Rust, Node (pkg/nexe/electron) |
 | Stop target | Process name = `APP_EXE` without `.exe`; optional Windows service `APP_SERVICE` |
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 | Run target | `Join-Path $OutDir APP_EXE` (or `Start-Service` when service) |
 
 ### Placeholder map (sample → project)
@@ -289,6 +350,7 @@ Confirm `./release` contains the exe and required companions, that any prior pro
 | `BUILD_BLOCK` | Stack build commands from reference |
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 | `COPY_BLOCK` | Install (copy) exe + deps into `$OutDir` |
 =======
 | `COPY_BLOCK` | Copy exe + deps into `$OutDir` |
@@ -296,5 +358,8 @@ Confirm `./release` contains the exe and required companions, that any prior pro
 =======
 | `COPY_BLOCK` | Copy exe + deps into `$OutDir` |
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+| `COPY_BLOCK` | Copy exe + deps into `$OutDir` |
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 | `TOOL_ASSERTS` | `Assert-Command` lines for required CLIs |
 | `EXTRA_PROCESS_NAMES` | Optional extra process names to stop (sidecars) |

@@ -124,6 +124,7 @@ $BuiltExe = @(
 Copy-Item -Force $BuiltExe (Join-Path $OutDir "APP_EXE")
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Required: WebView2Loader.dll must sit next to the exe or Windows reports it missing.
 $Loader = Join-Path $ReleaseDir "WebView2Loader.dll"
 if (Test-Path $Loader) {
@@ -133,6 +134,8 @@ if (Test-Path $Loader) {
 >>>>>>> 99137f7bc5c20b9185edadd7027bd7ddfc401e02
 =======
 >>>>>>> deea8f9624ed6f0d63e1d0b0c5d6dc6a41541d44
+=======
+>>>>>>> f152ceca3dffe29e3441f2306156edb35443c582
 ```
 
 ## Rust (non-Tauri)
