@@ -1,0 +1,37 @@
+{
+  "dirsFile": "useful-dirs.md",
+  "maxDepth": 5,
+  "repoTimeoutSec": 120,
+  "maxFileSizeMB": 5,
+  "emptyFolderMarker": ".gitkeep",
+  "lineEnding": "crlf",
+  "fileEncoding": "utf8",
+  "utf8Bom": false,
+  "gitAutoCrlf": true,
+  "maxAutoResolveConflictFiles": 3,
+  "criticalConflictPatterns": [
+    "*.sln",
+    "*.csproj",
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "web.config",
+    "app.config",
+    "*.sql"
+  ],
+  "skipDirs": [
+    "node_modules",
+    ".cache",
+    ".npm",
+    ".yarn",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    "dist",
+    "build"
+  ],
+  "secretPatterns": "\\.env$|\\.pem$|secret|credential|password|token\\.json"
+}
