@@ -1,10 +1,6 @@
 ---
-name: docker-deploy
-description: >-
-  Creates Docker deploy files under .armin/docker-scripts from skill samples
-  (run-on-docker-local/server .ps1 + .yaml). Use when adding or editing
-  local/server Docker deploy scripts or YAML under .armin/docker-scripts for any
-  containerized app, service, or stack.
+name: docker-scripts
+description: Creates Docker deploy files under .armin/docker-scripts from skill samples (run-on-docker-local/server .ps1 + .yaml). Use when adding or editing local/server Docker deploy scripts or YAML under .armin/docker-scripts for any containerized app, service, or stack.
 ---
 
 # Docker Deploy

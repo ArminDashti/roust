@@ -1,35 +1,41 @@
 ---
 name: ubuntu-server-irancell-t3
-description: Connects to and manages the Irancell-T3 Ubuntu server (2.144.27.74) via SSH MCP or fallback SSH. Use when deploying, inspecting, configuring, or troubleshooting the Irancell-T3 datacenter server, t3-new host, or cloud-admin remote operations in Iran.
+description: >-
+  Connects to and manages the Irancell-T3 Ubuntu server (2.144.27.74) via shell
+  SSH. Use when deploying, inspecting, configuring, or troubleshooting the
+  Irancell-T3 datacenter server, t3 host, or cloud-admin remote operations in Iran.
 ---
 
 # Irancell-T3 Server
 
-## Server reference
+## Overview
 
-Read [server.md](../server.md) for host inventory, credentials, and live system state.
+- Scope: remote ops on Irancell-T3 (`2.144.27.74`, host alias `t3`) as `cloud-admin`
+- Connection: shell SSH only — never use SSH MCP
+- Inventory: read [server.md](../server.md) for credentials and live system state
 
-## Connection workflow
+## Objectives
 
-### 1. Prefer SSH MCP
+1. Connect with `ssh t3`, falling back to `ssh t3 -p 80` if that fails
+2. Inspect safely before changes; keep load low on a small VPS
+3. Ask before critical or destructive commands
+4. Log the task and update inventory after major changes
 
-Use **SSH MCP** (`user-ssh-mcp`) for all remote operations. Reuse active sessions when possible.
+## Workflow
 
-If SSH MCP is unavailable or errors, fall back to shell SSH (step 2).
+### Step 1: Connect
 
-### 2. Fallback: shell SSH
-
-Try authentication in this order:
-
-**A. SSH key (try first)**
+1. Try:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_irancell -o IdentitiesOnly=yes cloud-admin@2.144.27.74
+ssh t3
 ```
 
-**B. Password (if key fails)**
+2. If that fails (timeout, connection refused, or unreachable), use:
 
-Read credentials from [server.md](../server.md). On Windows when non-interactive auth is required, use a short-lived Python `paramiko` one-liner — delete any helper script immediately after use.
+```bash
+ssh t3 -p 80
+```
 
 Suggested `~/.ssh/config` entry:
 
@@ -42,89 +48,16 @@ Host t3
     IdentitiesOnly yes
 ```
 
-Then: `ssh t3`
+If key auth fails, read credentials from [server.md](../server.md). On Windows when non-interactive auth is required, use a short-lived Python `paramiko` one-liner — delete any helper script immediately after use.
 
-### 3. Verify connectivity
-
-Run safe read-only checks before changes:
+### Step 2: Verify connectivity
 
 ```bash
 hostname && uname -a
 uptime && free -h && df -h /
 ```
 
-## Core rules
-
-### Use SSH MCP first
-
-Always attempt SSH MCP before shell SSH. Reuse sessions across commands in the same task.
-
-### Protect SSH connectivity
-
-Never run commands that could break the active SSH session without explicit user approval.
-
-**Forbidden without approval:**
-
-```bash
-sudo systemctl stop ssh
-sudo systemctl restart networking
-sudo iptables -F
-sudo reboot
-sudo shutdown now
-```
-
-Prefer `sudo systemctl reload ssh` over restart.
-
-### Low-impact operations only
-
-Server has **2 CPU cores, 2 GB RAM, 30 GB SSD**. Avoid heavy workloads, large downloads, or concurrent intensive tasks.
-
-**Avoid without approval:**
-
-- Full system upgrades (`apt upgrade` on all packages)
-- Building large projects on-server
-- Stress tests or benchmarks
-- Mass file transfers
-- Service restarts on production workloads
-
-**Safe defaults:** read-only inspection, small config edits, targeted package installs.
-
-### Ask before critical commands
-
-Ask the user before:
-
-- Reboot / shutdown
-- Restarting services
-- Firewall or networking changes
-- Deleting important files
-- Replacing configs
-- Destructive or security-sensitive operations
-- Anything that could affect uptime or performance
-
-### Privileged commands
-
-`cloud-admin` has passwordless sudo. Still prefix privileged commands with `sudo` and inspect state first.
-
-### Cleanup
-
-Delete all temporary scripts, configs, and archives created during a task:
-
-```bash
-rm -f /tmp/temp_script.sh
-```
-
-Never leave helper scripts on the server or in the repo after the task.
-
-### Modern commands
-
-| Deprecated | Preferred |
-|---|---|
-| `ifconfig` | `ip` |
-| `netstat` | `ss` |
-| `service` | `systemctl` |
-| `apt-get` | `apt` |
-
-## Pre-change inspection
+### Step 3: Pre-change inspection
 
 **Firewall:**
 
@@ -147,35 +80,41 @@ systemctl is-active ssh
 ss -tlnp
 ```
 
-## Config edits
+### Step 4: Make changes
 
-Back up before editing:
+- Back up before editing: `sudo cp /etc/some/config /etc/some/config.bak`
+- Prefer `sudo systemctl reload ssh` over restart
+- Use modern commands: `ip` (not `ifconfig`), `ss` (not `netstat`), `systemctl` (not `service`), `apt` (not `apt-get`)
+- Prefix privileged commands with `sudo` (`cloud-admin` has passwordless sudo)
 
-```bash
-sudo cp /etc/some/config /etc/some/config.bak
-```
+### Step 5: Cleanup and log
 
-## Security
+- Delete temp scripts/archives on the server and locally when done
+- Save downloads to `./downloaded-files/`
+- Append or create `./logs/<brief-task-title>.mdc` with title, timestamp, commands, outputs, result, warnings
+- After major system changes, update [server.md](../server.md)
 
-- Do not expose credentials in logs, commits, or chat output when avoidable.
-- Do not disable firewalls unless explicitly required.
-- Apply least privilege; validate permissions after changes.
+## Safety rules
 
-## Task logging
+1. **Never** use SSH MCP — shell SSH only (`ssh t3`, then `ssh t3 -p 80`).
+2. **Never** run session-breaking commands without explicit user approval: `systemctl stop ssh`, restart networking, `iptables -F`, `reboot`, `shutdown`.
+3. **Never** run heavy workloads without approval: full `apt upgrade`, large builds, stress tests, mass transfers, production service restarts.
+4. **Always** ask before reboot/shutdown, service restarts, firewall/network changes, deleting important files, replacing configs, or anything that affects uptime.
+5. **Always** avoid exposing credentials in logs, commits, or chat when avoidable.
+6. **Never** disable firewalls unless explicitly required; apply least privilege and validate permissions after changes.
+7. **Always** clean up temporary helpers after the task.
 
-After every server task, append or create a log in `./logs/<brief-task-title>.mdc` with:
+## Key facts & reference
 
-- Task title and timestamp
-- Commands executed
-- Important outputs
-- Final result and warnings
-
-Create `./logs/` if missing.
-
-## Downloads
-
-Save files fetched from the server to `./downloaded-files/`.
-
-## Update server inventory
-
-After major system changes, update [server.md](../server.md) with new OS details, ports, services, disk usage, and installed software.
+| Item | Value |
+|------|-------|
+| Host | `2.144.27.74` |
+| Alias | `t3` |
+| User | `cloud-admin` |
+| Primary connect | `ssh t3` |
+| Fallback connect | `ssh t3 -p 80` |
+| Identity file | `~/.ssh/id_ed25519_irancell` |
+| Resources | 2 CPU, 2 GB RAM, 30 GB SSD |
+| Inventory | [server.md](../server.md) |
+| Task logs | `./logs/<brief-task-title>.mdc` |
+| Downloads | `./downloaded-files/` |

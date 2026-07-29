@@ -1,10 +1,6 @@
 ---
-name: armin-session
-description: >-
-  Creates and updates session markdown logs under .armin/sessions/ with metadata
-  (ID, Agent, Date, Time, Device), Skills, Rules, and a prompt/response transcript.
-  Use when the user asks to save a session, write a session title.md, log a chat
-  under .armin/sessions, or record agent conversation turns without reasoning.
+name: session-log
+description: Creates and updates session markdown logs under .armin/sessions/ with metadata (ID, Agent, Date, Time, Device), Skills, Rules, and a prompt/response transcript. Use when the user asks to save a session, write a session title.md, log a chat under .armin/sessions, or record agent conversation turns without reasoning.
 ---
 
 # Armin Session Log
