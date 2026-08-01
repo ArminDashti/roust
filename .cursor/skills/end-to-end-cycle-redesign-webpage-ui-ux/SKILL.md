@@ -1,8 +1,16 @@
 ---
 name: end-to-end-cycle-redesign-webpage-ui-ux
-description: Runs the full webpage engineering loop on one or more pages: audit (webpage-debugging), agent solutions (webpage-debugging-to-solutions), implement (webpage-solutions-to-implement), then compliance check (webpage-compliance-check). Passes artifact paths between stages and writes the loop report to ./.argent/webpage-engineering-loop/<UUID>.md. Use when the user asks to run the webpage loop, full UI fix pipeline, debug-to-compliance flow, or "loop engineering" on a page/URL.
+description: >-
+  Runs the full webpage engineering loop on one or more pages: audit (webpage-debugging), agent solutions (webpage-debugging-to-solutions), implement (webpage-solutions-to-implement), then compliance check (webpage-compliance-check). Passes artifact paths between stages and writes the loop report to ./.argent/webpage-engineering-loop/<UUID>.md. Use when the user asks to run the webpage loop, full UI fix pipeline, debug-to-compliance flow, or "loop engineering" on a page/URL.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 1dcc8666-7e0c-44fa-9adf-da7311a20649
 ---
-
 # Webpage Engineering Loop
 
 ## Overview

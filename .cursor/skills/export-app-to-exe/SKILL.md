@@ -1,8 +1,15 @@
 ---
 name: export-app-to-exe
 description: 
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 15ca3ecf-f83f-43ce-8c26-82f247b96f5a
 ---
-
 # Export EXE
 
 ## Overview

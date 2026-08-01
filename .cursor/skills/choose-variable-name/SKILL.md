@@ -1,8 +1,16 @@
 ---
 name: choose-variable-name
-description: Governs how agents name variables, functions, classes, files, modules, hooks, types, constants, and all other code identifiers when writing new code or suggesting names. Apply whenever writing any new code — TypeScript, Python, Go, Rust, Java, Swift, Kotlin, or any other language — or when the user asks for variable name suggestions, naming conventions, or identifier naming decisions. Names must feel like they belong to a world-class product: cutting-edge, globally professional, and polished. Trigger on code generation, scaffolding, refactoring of new code, API design, schema definition, or naming decisions. Do NOT rename existing identifiers unless the user explicitly asks.
+description: >-
+  Governs how agents name variables, functions, classes, files, modules, hooks, types, constants, and all other code identifiers when writing new code or suggesting names. Apply whenever writing any new code — TypeScript, Python, Go, Rust, Java, Swift, Kotlin, or any other language — or when the user asks for variable name suggestions, naming conventions, or identifier naming decisions. Names must feel like they belong to a world-class product: cutting-edge, globally professional, and polished. Trigger on code generation, scaffolding, refactoring of new code, API design, schema definition, or naming decisions. Do NOT rename existing identifiers unless the user explicitly asks.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 015b30c6-0342-43d7-8717-448992eb701b
 ---
-
 # Variable Naming Conventions
 
 ## Core Principle

@@ -1,8 +1,16 @@
 ---
 name: how-to-work-with-openrouter
-description: Integrates apps with OpenRouter (chat completions, model search, credits/key usage, HTTP proxy egress, settings UX). Use when adding or changing OpenRouter clients, API keys, model pickers, credits/balance UI, or LLM transform calls via openrouter.ai.
+description: >-
+  Integrates apps with OpenRouter (chat completions, model search, credits/key usage, HTTP proxy egress, settings UX). Use when adding or changing OpenRouter clients, API keys, model pickers, credits/balance UI, or LLM transform calls via openrouter.ai.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 1391b0e2-f8f4-468a-8a30-836bd2703ce7
 ---
-
 # OpenRouter Experience
 
 Proven patterns from Lexmora (`translator-api` / `translator-webui`). Prefer these over inventing a new OpenRouter client shape.

@@ -1,8 +1,16 @@
 ---
 name: how-to-work-with-darou-pakhsh-projects
-description: Guidance for Darou Pakhsh Distribution (DPDC) IT work in Tehran: VB/C# .NET Framework codebases, Pakhsh_Data_New SQL Server, SSRS reports, and TFS version control. Use when editing company ERP code, running SQL, building RDL reports, working with TFS repos, or any Darou Pakhsh / Pakhsh distribution task.
+description: >-
+  Guidance for Darou Pakhsh Distribution (DPDC) IT work in Tehran: VB/C# .NET Framework codebases, Pakhsh_Data_New SQL Server, SSRS reports, and TFS version control. Use when editing company ERP code, running SQL, building RDL reports, working with TFS repos, or any Darou Pakhsh / Pakhsh distribution task.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 0792690f-77ee-4163-afdf-d5ce4b92543e
 ---
-
 # Darou Pakhsh Distribution Company
 
 ## Company Context

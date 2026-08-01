@@ -1,8 +1,16 @@
 ---
 name: test-restful-api
-description: Tests RESTful APIs end-to-end by first generating Docker deploy scripts with `docker-deploy`, deploying locally, then validating every endpoint across positive, negative, edge, auth, and error scenarios at user-chosen depth (basic, standard, or comprehensive). Use when the user asks to test API endpoints in Docker or requests REST API scenario coverage. Writes report to `./.argent/api-test/YYYY-MM-DD-HH-MM-<depth>.md`.
+description: >-
+  Tests RESTful APIs end-to-end by first generating Docker deploy scripts with `docker-deploy`, deploying locally, then validating every endpoint across positive, negative, edge, auth, and error scenarios at user-chosen depth (basic, standard, or comprehensive). Use when the user asks to test API endpoints in Docker or requests REST API scenario coverage. Writes report to `./.argent/api-test/YYYY-MM-DD-HH-MM-<depth>.md`.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:22"
+  uuid: 010a33a4-62e3-4c5a-b416-ce7ea7b005ff
 ---
-
 # RESTful API Testing
 
 ## Overview

@@ -1,8 +1,16 @@
 ---
 name: keep-app-version-up-to-date
-description: Assigns and bumps software version numbers using SemVer, CalVer, sequential builds, and pre-release tags. Use when versioning a release, choosing the next version, writing Git tags, updating CHANGELOG version headers, or when the user asks about SemVer, CalVer, alpha/beta/RC, or build numbers. Focus only on versioning — not packaging, publishing, or deploy pipelines beyond version bump automation.
+description: >-
+  Assigns and bumps software version numbers using SemVer, CalVer, sequential builds, and pre-release tags. Use when versioning a release, choosing the next version, writing Git tags, updating CHANGELOG version headers, or when the user asks about SemVer, CalVer, alpha/beta/RC, or build numbers. Focus only on versioning — not packaging, publishing, or deploy pipelines beyond version bump automation.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:22"
+  uuid: 071e7b36-147b-4777-b0cc-9515c2476c5f
 ---
-
 # Software Versioning
 
 ## Overview

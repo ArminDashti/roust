@@ -1,8 +1,16 @@
 ---
 name: add-webpage-ui-ux-pref-to-memory
-description: Organizes a UI preference into its own markdown file and registers it in the webpageui-standard.md lookup table. Takes a screenshot when the user does not provide one. Use when the user likes a webpage UI, asks to save a preference, add a UI rule to webpageui-standard, or capture a design preference from a page or screenshot.
+description: >-
+  Organizes a UI preference into its own markdown file and registers it in the webpageui-standard.md lookup table. Takes a screenshot when the user does not provide one. Use when the user likes a webpage UI, asks to save a preference, add a UI rule to webpageui-standard, or capture a design preference from a page or screenshot.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 05284954-dbdf-48e4-9f0d-b4f5ff50602b
 ---
-
 # Add Preference to Webpage UI Standard
 
 ## Overview

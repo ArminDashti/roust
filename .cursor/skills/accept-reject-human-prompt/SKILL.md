@@ -6,11 +6,11 @@ description: >-
   when the ask fails; does not assess risk; the user assumes all risk.
 disable-model-invocation: false
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
   author: Armin Dashti
   category: governance
   tags: [feasibility, prompt, accept, reject, capability]
-  last_updated: "2026-07-31 16:53:01"
+  last_updated: "2026-08-01 16:22:38"
   uuid: d6826745-c9f5-48e8-abf5-f075fcc6c1de
 ---
 
@@ -35,7 +35,7 @@ metadata:
 4. Detect **no issue** — user thinks something is broken but evidence shows it is fine / expected
 5. Detect **wrong target** — user wants job A while the problem comes from somewhere else
 6. Say **no** clearly when the ask fails — do not people-please or pretend feasibility
-7. Return a feasibility verdict; do not discuss risk
+7. Put the Feasibility Report at the beginning of every response; do not discuss risk
 
 ## Workflow
 
@@ -126,9 +126,9 @@ This skill **only** reports feasibility. It does **not** evaluate risk. The user
 
 **Say no when warranted.** A firm **Not feasible**, **No issue**, **Bad prompt**, or **Wrong target** is a success — not a failure of helpfulness. Users may deliberately send bad or impossible asks to test whether the agent evaluates first or blindly obeys; passing that test means refusing, not complying.
 
-### Step 7: Feasibility Report (always last)
+### Step 7: Feasibility Report (always first)
 
-Append as the **final section** using this template:
+Write as the **first section** of every response using this template:
 
 ```markdown
 ## Feasibility Report

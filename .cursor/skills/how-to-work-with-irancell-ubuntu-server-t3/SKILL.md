@@ -1,8 +1,16 @@
 ---
 name: how-to-work-with-irancell-ubuntu-server-t3
-description: Connects to and manages the Irancell-T3 Ubuntu server (2.144.27.74) via SSH MCP or fallback SSH. Use when deploying, inspecting, configuring, or troubleshooting the Irancell-T3 datacenter server, t3-new host, or cloud-admin remote operations in Iran.
+description: >-
+  Connects to and manages the Irancell-T3 Ubuntu server (2.144.27.74) via SSH MCP or fallback SSH. Use when deploying, inspecting, configuring, or troubleshooting the Irancell-T3 datacenter server, t3-new host, or cloud-admin remote operations in Iran.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 0d181814-d0de-42cd-bcc7-4ba25d5a2476
 ---
-
 # Irancell-T3 Server
 
 ## Server reference

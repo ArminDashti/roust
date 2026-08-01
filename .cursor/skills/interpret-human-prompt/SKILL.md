@@ -1,8 +1,16 @@
 ---
 name: interpret-human-prompt
-description: Use this skill whenever a human gives a vague, ambiguous, poorly structured, or overly conversational prompt that needs to be interpreted, clarified, or enhanced into clear, agent-friendly instructions before acting on it. Triggers include: requests that mix multiple goals together, prompts with implicit assumptions or missing context, casual natural language that would confuse an agent ("can you kinda like fix the thing"), multi-step tasks described as a single sentence, contradictory instructions, or any time the human's intent is unclear. Also trigger when a user asks to "enhance", "improve", "clean up", "simplify", or "rewrite a prompt for an agent", or when they paste a long rambling request and expect something structured out of it. When in doubt, use this skill — it's better to interpret than to execute blindly on a bad prompt. Also apply during and after any work (add, edit, delete code, or execute commands) to keep the project's ./growth-log/ documentation up to date as the project grows.
+description: >-
+  Use this skill whenever a human gives a vague, ambiguous, poorly structured, or overly conversational prompt that needs to be interpreted, clarified, or enhanced into clear, agent-friendly instructions before acting on it. Triggers include: requests that mix multiple goals together, prompts with implicit assumptions or missing context, casual natural language that would confuse an agent ("can you kinda like fix the thing"), multi-step tasks described as a single sentence, contradictory instructions, or any time the human's intent is unclear. Also trigger when a user asks to "enhance", "improve", "clean up", "simplify", or "rewrite a prompt for an agent", or when they paste a long rambling request and expect something structured out of it. When in doubt, use this skill — it's better to interpret than to execute blindly on a bad prompt. Also apply during and after any work (add, edit, delete code, or execute commands) to keep the project's ./growth-log/ documentation up to date as the project grows.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:22"
+  uuid: 0fbf76ce-4cab-46a5-b903-8f0b4d81f1fc
 ---
-
 # Prompt Interpreter & Enhancer
 
 This skill has two phases:

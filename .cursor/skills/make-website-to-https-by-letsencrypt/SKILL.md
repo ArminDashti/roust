@@ -1,8 +1,16 @@
 ---
 name: make-website-to-https-by-letsencrypt
-description: Issues and renews Let's Encrypt certificates for Docker HAProxy SNI on Irancell-T3 (xaigrok.ir hostnames). Use when adding TLS certs, replacing self-signed PEMs, Certbot/ACME, or LE renewals for dogan/exar/lexmora (or similar) behind reverse-proxy haproxy.
+description: >-
+  Issues and renews Let's Encrypt certificates for Docker HAProxy SNI on Irancell-T3 (xaigrok.ir hostnames). Use when adding TLS certs, replacing self-signed PEMs, Certbot/ACME, or LE renewals for dogan/exar/lexmora (or similar) behind reverse-proxy haproxy.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:22"
+  uuid: 1bbc5420-16e5-4ef5-9d6e-07208e01457a
 ---
-
 # HAProxy + Let's Encrypt (t3)
 
 ## Prerequisites

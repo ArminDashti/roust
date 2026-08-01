@@ -1,8 +1,16 @@
 ---
 name: remove-unused-code
-description: Safely removes dead or orphan code — symbols, imports, files, or blocks with no connections to live code. Use when the user asks to remove unused, dead, unreachable, or orphaned code; clean up unused imports; or delete files/modules with zero references.
+description: >-
+  Safely removes dead or orphan code — symbols, imports, files, or blocks with no connections to live code. Use when the user asks to remove unused, dead, unreachable, or orphaned code; clean up unused imports; or delete files/modules with zero references.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:22"
+  uuid: 0a851c8c-7408-456b-9327-50921dd84d17
 ---
-
 # Code Removal (Dead / Orphan Only)
 
 **Scope:** Remove only code that is provably dead or orphaned — not referenced, imported, called, exported, registered, or reachable from any live code path.

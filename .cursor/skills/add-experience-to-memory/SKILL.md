@@ -1,8 +1,16 @@
 ---
 name: add-experience-to-memory
-description: Records problems, issues, and project learnings as question-and-answer entries in ./exprience/exprience.md at the project root. Use when the user asks to save, record, log, or capture an experience, problem, issue, solution, or lesson learned for the current project.
+description: >-
+  Records problems, issues, and project learnings as question-and-answer entries in ./exprience/exprience.md at the project root. Use when the user asks to save, record, log, or capture an experience, problem, issue, solution, or lesson learned for the current project.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 1f2c8566-deee-4406-b33a-b7b13ac657d0
 ---
-
 # Project Experience Log
 
 ## Overview

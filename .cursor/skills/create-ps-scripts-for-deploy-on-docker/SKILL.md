@@ -1,8 +1,16 @@
 ---
 name: create-ps-scripts-for-deploy-on-docker
-description: Creates Docker deploy files under .armin/docker-scripts from skill samples (run-on-docker-local/server .ps1 + .yaml). Use when adding or editing local/server Docker deploy scripts or YAML under .armin/docker-scripts for any containerized app, service, or stack.
+description: >-
+  Creates Docker deploy files under .armin/docker-scripts from skill samples (run-on-docker-local/server .ps1 + .yaml). Use when adding or editing local/server Docker deploy scripts or YAML under .armin/docker-scripts for any containerized app, service, or stack.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:21"
+  uuid: 0a4b3bdb-687b-46d9-af04-705b7192778a
 ---
-
 # Docker Deploy
 
 ## Overview

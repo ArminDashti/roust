@@ -1,8 +1,16 @@
 ---
 name: webpage-ui-ux-debugging
-description: Reviews a list of UI pages, inspects each one, and for messy pages writes a per-page improvement prompt with issues and problems to ./.argent/webpage-debugging/<UUID>.md at the project root. Use when the user gives page names, routes, or URLs to audit, asks to review messy UI, generate UI fix proposals, or create prompts for page cleanup.
+description: >-
+  Reviews a list of UI pages, inspects each one, and for messy pages writes a per-page improvement prompt with issues and problems to ./.argent/webpage-debugging/<UUID>.md at the project root. Use when the user gives page names, routes, or URLs to audit, asks to review messy UI, generate UI fix proposals, or create prompts for page cleanup.
+disable-model-invocation: false
+metadata:
+  version: 1.0.0
+  author: "Armin Dashti"
+  category: 
+  tags: []
+  last_updated: "2026-08-01 13:03:22"
+  uuid: 03c66eb8-ee91-4192-bc6f-97df6d5bc871
 ---
-
 # UI Page Audit Proposals
 
 ## Overview
