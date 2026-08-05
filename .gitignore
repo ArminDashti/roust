@@ -23,3 +23,5 @@ target/
 
 # --- auto: github-commit-push-all-repos ---
 # --- end auto ---
+
+# auto-managed large files (>5MB)
