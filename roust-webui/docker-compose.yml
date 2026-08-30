@@ -1,0 +1,25 @@
+name: roust
+
+services:
+  roust-webui:
+    image: ${IMAGE_TAG:-roust-webui:latest}
+    container_name: roust-webui
+    expose:
+      - "${INTERNAL_PORT:-80}"
+    ports:
+      - target: ${INTERNAL_PORT:-80}
+        published: ${PUBLISH_PORT-5187}
+        protocol: tcp
+    environment:
+      API_HOST: ${API_HOST:-host.docker.internal}
+      API_PORT: ${API_PORT:-8787}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app_net
+    restart: "no"
+
+networks:
+  app_net:
+    name: ${DOCKER_NETWORK:-roust-net}
+    external: true

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "python .cursor/hooks/run-updated-apps-after-response.py afterFileEdit",
+        "timeout": 10,
+        "uuid": "d46bfe29-5cad-4718-bccf-af9404405353",
+        "version": "1.0.0",
+        "author": "Armin Dashti",
+        "category": "devops",
+        "tags": ["run", "api", "webui", "hot-reload"],
+        "last_updated": "2026-08-24 09:53:31"
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "python .cursor/hooks/run-updated-apps-after-response.py afterAgentResponse",
+        "timeout": 15,
+        "uuid": "d743c499-ebbc-4471-88ac-5be77f49f55e",
+        "version": "1.0.0",
+        "author": "Armin Dashti",
+        "category": "devops",
+        "tags": ["run", "api", "webui", "hot-reload"],
+        "last_updated": "2026-08-24 09:53:31"
+      }
+    ]
+  }
+}

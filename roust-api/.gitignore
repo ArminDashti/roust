@@ -1,0 +1,145 @@
+*.exe
+*.EXE
+
+# Logs
+logs
+*.log
+
+# Rust build artifacts
+target/
+*.pdb
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+/assets
+
+# --- auto: github-commit-push-all-repos ---
+# --- end auto ---
+
+# auto-managed large files (>5MB)
+
+# WinDivert SDK (place WinDivert-2.2.2-A next to Cargo.toml for local builds)
+WinDivert-2.2.2-A/
+
+# === auto-managed large files (>5MB) ===
+
+# BEGIN AUTO-MANAGED LARGE FILES (>5MB)
+# END AUTO-MANAGED LARGE FILES
+
+# === auto-managed large files (github-commit-push-all) ===
+# auto-managed-large-files
+target/debug/roust-api.exe
+target/debug/roust_api.pdb
+target/debug/deps/libaho_corasick-6315e8a013841576.rlib
+target/debug/deps/libaxum-971ab430722eb95e.rlib
+target/debug/deps/libaxum-971ab430722eb95e.rmeta
+target/debug/deps/libclap_builder-dd3a571e1a867aad.rlib
+target/debug/deps/libhyper-526f95f5014379b8.rlib
+target/debug/deps/libjiff-b5cec34b7757c69c.rlib
+target/debug/deps/libjiff-b5cec34b7757c69c.rmeta
+target/debug/deps/libregex_automata-f80711e0bb635edb.rlib
+target/debug/deps/libregex_syntax-665dffe64d3e6cdd.rlib
+target/debug/deps/libring-0979c4a696e2b9a1.rlib
+target/debug/deps/libroust-a617e24ebd037148.rlib
+target/debug/deps/librustls-0cf5c14adeb73b6c.rlib
+target/debug/deps/libserde_core-f82dc9a575757996.rlib
+target/debug/deps/libserde_json-9802f3751e8b0d73.rlib
+target/debug/deps/libsyn-8110dccc5e560c34.rlib
+target/debug/deps/libsyn-b178e79044eb8989.rlib
+target/debug/deps/libtokio-cadf864e0f4b96e3.rlib
+target/debug/deps/libtokio-cadf864e0f4b96e3.rmeta
+target/debug/deps/libureq-8d09157d839398dd.rlib
+target/debug/deps/libwebpki-74b06684d50c7861.rlib
+target/debug/deps/libwindows-617a8228ddf7a69d.rlib
+target/debug/deps/libwindows-617a8228ddf7a69d.rmeta
+target/debug/deps/libwindows_sys-3d5669fe59d55179.rlib
+target/debug/deps/libwindows_sys-3d5669fe59d55179.rmeta
+target/debug/deps/libwindows_sys-f56f979594854860.rlib
+target/debug/deps/libwindows_sys-f56f979594854860.rmeta
+target/debug/deps/roust_api.exe
+target/debug/deps/roust_api.pdb
+target/debug/incremental/roust-0tss48h8li2xg/s-hl3l418ph7-0o4kkht-9mbcb6dl2tejecw6588c4d9ia/dep-graph.bin
+target/debug/incremental/roust-0tss48h8li2xg/s-hl3l418ph7-0o4kkht-9mbcb6dl2tejecw6588c4d9ia/query-cache.bin
+target/debug/incremental/roust-0tss48h8li2xg/s-hl3l8fones-01xe7z8-45o3pf7aa1yjr4onnn48r2khm/dep-graph.bin
+target/debug/incremental/roust-0tss48h8li2xg/s-hl3l8fones-01xe7z8-45o3pf7aa1yjr4onnn48r2khm/query-cache.bin
+
+# AUTO-IGNORE-LARGE-FILES (>5MB) â€” managed by github-commit-push-all
+# github-commit-push-all: large files (>5MB) — auto-managed
+
+target/debug/deps/libaho_corasick-e056ea06535c09b2.rlib
+target/debug/deps/libaxum-3f310d57f2d55ad0.rlib
+target/debug/deps/libaxum-3f310d57f2d55ad0.rmeta
+target/debug/deps/libclap_builder-381c32952417ef27.rlib
+target/debug/deps/libhyper-5f76b61f658765d2.rlib
+target/debug/deps/libjiff-99f40589ad03c874.rlib
+target/debug/deps/libjiff-99f40589ad03c874.rmeta
+target/debug/deps/libregex_automata-c8fc2e7a5eff21ae.rlib
+target/debug/deps/libregex_syntax-979b5fdd89e31504.rlib
+target/debug/deps/libring-dfd4ccc270403777.rlib
+target/debug/deps/libroust-2d36afa82d046bd3.rlib
+target/debug/deps/librustls-66939b106b0a9d64.rlib
+target/debug/deps/libserde_core-17997fb3b967dda8.rlib
+target/debug/deps/libserde_json-d0caae45948c175f.rlib
+target/debug/deps/libsyn-9021c83232a9de72.rlib
+target/debug/deps/libsyn-c6407fa9fd850fb6.rlib
+target/debug/deps/libtokio-f6f226795ffc9193.rlib
+target/debug/deps/libtokio-f6f226795ffc9193.rmeta
+target/debug/deps/libureq-40ba4794696c1e2b.rlib
+target/debug/deps/libwebpki-b7e6d99cc331ca15.rlib
+target/debug/deps/libwindows-0e57d620ab18a63c.rlib
+target/debug/deps/libwindows-0e57d620ab18a63c.rmeta
+target/debug/deps/libwindows_sys-6a18a70662e351ca.rlib
+target/debug/deps/libwindows_sys-6a18a70662e351ca.rmeta
+target/debug/deps/libwindows_sys-eb064b402c5584e4.rlib
+target/debug/deps/libwindows_sys-eb064b402c5584e4.rmeta
+target/debug/incremental/roust-1b410m8ms600e/s-hlkvpiojhy-13ei91g-a68smir4y88ngusw7j4v0iu45/dep-graph.bin
+target/debug/incremental/roust-1b410m8ms600e/s-hlkvpiojhy-13ei91g-a68smir4y88ngusw7j4v0iu45/query-cache.bin
+target/debug/incremental/roust-1b410m8ms600e/s-hlkvqgiurt-0ihtafd-a68smir4y88ngusw7j4v0iu45/dep-graph.bin
+target/debug/incremental/roust-1b410m8ms600e/s-hlkvqgiurt-0ihtafd-a68smir4y88ngusw7j4v0iu45/query-cache.bin
+
+target/debug/incremental/roust-1b410m8ms600e/s-hlm38zamty-0pc1b9a-041s8havmhn9opqdzc7havz7z/dep-graph.bin
+target/debug/incremental/roust-1b410m8ms600e/s-hlm38zamty-0pc1b9a-041s8havmhn9opqdzc7havz7z/query-cache.bin
+
+# auto-managed: files > 5MB
+
+# Cursor project hooks runtime
+.cursor/hooks/state/
+.cursor/hooks/hook-debug.log
+.cursor/hooks/run-updated-apps.log
+
+target/debug/deps/libtokio-44bb556c54b5b643.rmeta
+target/debug/deps/libwindows_sys-020a284f1c969b93.rmeta
+target/debug/deps/libwindows_sys-55c3747e6693727f.rmeta
+target/debug/deps/libwindows-28ee32db56842a46.rmeta
+target/debug/deps/roust-02224d26f1316cb4.pdb
+target/debug/incremental/roust-08qljgr76gmep/s-hlmyuicfj1-0du9xy8-6vtkq7ik1f2onoz83k1t3kc5s/dep-graph.bin
+target/debug/incremental/roust-08qljgr76gmep/s-hlmyuicfj1-0du9xy8-6vtkq7ik1f2onoz83k1t3kc5s/query-cache.bin
+target/debug/incremental/roust-1b410m8ms600e/s-hln70autmf-1nekh4f-23a1ai8w9mf4mascqmoalzmoy/dep-graph.bin
+target/debug/incremental/roust-1b410m8ms600e/s-hln70autmf-1nekh4f-23a1ai8w9mf4mascqmoalzmoy/query-cache.bin
+target/debug/incremental/roust-220tvw87iu72q/s-hln6xmj6l4-07aq2b6-10prbkwwld749b52tgtzdcnak/dep-graph.bin
+target/release/deps/libaxum-adc06bf199a3eed5.rlib
+target/release/deps/libaxum-adc06bf199a3eed5.rmeta
+target/release/deps/libjiff-d8886502bc7fe172.rlib
+target/release/deps/libjiff-d8886502bc7fe172.rmeta
+target/release/deps/libregex_automata-6b80cf3449fd4abf.rlib
+target/release/deps/librustls-d86e1de2dd0930fd.rlib
+target/release/deps/libserde_core-56f4b834884634f9.rlib
+target/release/deps/libserde_core-56f4b834884634f9.rmeta
+target/release/deps/libsyn-3febc655fdc6124f.rlib
+target/release/deps/libsyn-7fae1c415eba6e15.rlib
+target/release/deps/libtokio-5f07107590e1d091.rlib
+target/release/deps/libtokio-5f07107590e1d091.rmeta
+target/release/deps/libwindows_sys-09886751279c9aa5.rlib
+target/release/deps/libwindows_sys-09886751279c9aa5.rmeta
+target/release/deps/libwindows_sys-d15ebda2de85c70e.rlib
+target/release/deps/libwindows_sys-d15ebda2de85c70e.rmeta
+target/release/deps/libwindows-43bcbe6aee5b291f.rlib
+target/release/deps/libwindows-43bcbe6aee5b291f.rmeta

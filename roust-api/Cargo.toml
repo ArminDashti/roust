@@ -1,0 +1,47 @@
+[package]
+name = "roust-api"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+
+[lib]
+name = "roust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "roust"
+path = "src/main.rs"
+
+[[bin]]
+name = "roust-setup"
+path = "src/bin/roust-setup.rs"
+
+[[bin]]
+name = "roust-api"
+path = "src/bin/roust-api.rs"
+
+[dependencies]
+clap = { version = "=4.5.27", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ipnetwork = "0.20"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_System_Memory",
+    "Win32_System_Com",
+] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1.0"
+windows-service = "0.7"
+ureq = "2.12"
+zip = { version = "=0.6.6", default-features = false, features = ["deflate"] }
+url = "=2.5.0"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower-http = { version = "0.6", features = ["cors"] }

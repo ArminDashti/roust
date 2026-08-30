@@ -1,0 +1,20 @@
+name: roust
+
+services:
+  roust-api:
+    image: ${IMAGE_TAG:-roust-api:latest}
+    container_name: roust-api
+    expose:
+      - "${INTERNAL_PORT:-8787}"
+    ports:
+      - target: ${INTERNAL_PORT:-8787}
+        published: ${PUBLISH_PORT-8787}
+        protocol: tcp
+    networks:
+      - app_net
+    restart: "no"
+
+networks:
+  app_net:
+    name: ${DOCKER_NETWORK:-roust-net}
+    external: true

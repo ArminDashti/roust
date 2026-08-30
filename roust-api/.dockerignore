@@ -1,0 +1,11 @@
+# Build outputs
+**/target
+dist
+
+# VCS and editor
+.git
+.github
+.cursor
+
+# Runtime / local artifacts
+**/*.log
