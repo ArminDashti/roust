@@ -71,8 +71,8 @@ target/debug/incremental/roust-0tss48h8li2xg/s-hl3l418ph7-0o4kkht-9mbcb6dl2tejec
 target/debug/incremental/roust-0tss48h8li2xg/s-hl3l8fones-01xe7z8-45o3pf7aa1yjr4onnn48r2khm/dep-graph.bin
 target/debug/incremental/roust-0tss48h8li2xg/s-hl3l8fones-01xe7z8-45o3pf7aa1yjr4onnn48r2khm/query-cache.bin
 
-# AUTO-IGNORE-LARGE-FILES (>5MB) â€” managed by github-commit-push-all
-# github-commit-push-all: large files (>5MB) — auto-managed
+# AUTO-IGNORE-LARGE-FILES (>5MB) Ã¢â‚¬â€ managed by github-commit-push-all
+# github-commit-push-all: large files (>5MB) â€” auto-managed
 
 target/debug/deps/libaho_corasick-e056ea06535c09b2.rlib
 target/debug/deps/libaxum-3f310d57f2d55ad0.rlib
@@ -143,3 +143,4 @@ target/release/deps/libwindows_sys-d15ebda2de85c70e.rlib
 target/release/deps/libwindows_sys-d15ebda2de85c70e.rmeta
 target/release/deps/libwindows-43bcbe6aee5b291f.rlib
 target/release/deps/libwindows-43bcbe6aee5b291f.rmeta
+# large files (>5MB) - do not commit
