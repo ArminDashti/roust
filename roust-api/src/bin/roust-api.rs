@@ -1,5 +1,6 @@
 use clap::Parser;
 use roust::api::{self, ApiOptions};
+use roust::elevation;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -17,6 +18,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Service control, host routes, and WFP require Administrator.
+    elevation::ensure_elevated()?;
+
     env_logger::Builder::from_default_env()
         .format_timestamp_secs()
         .init();

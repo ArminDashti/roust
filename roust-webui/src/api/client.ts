@@ -31,12 +31,58 @@ export interface AdapterItem {
   friendly_name: string | null
   mac_address: string
   if_index: number
+  ipv4_address: string | null
+  status: string
+}
+
+export interface PingReply {
+  seq: number
+  success: boolean
+  rtt_ms?: number
+  error?: string
+}
+
+export interface PingResult {
+  host: string
+  dest_ip: string
+  nic: string
+  source_ip: string
+  sent: number
+  received: number
+  loss_pct: number
+  route_restored: boolean
+  replies: PingReply[]
+}
+
+export interface PingRequest {
+  host: string
+  nic: string
+  count?: number
 }
 
 export interface ServiceActionResponse {
   ok: boolean
   installed: boolean
   state: string
+}
+
+export interface ProcessItem {
+  pid: number
+  image_name: string
+  exe_path?: string
+}
+
+export type AppBindStatus = 'healthy' | 'nic-down' | 'unresolved'
+
+export interface AppBind {
+  'exe-path'?: string
+  'image-name'?: string
+  nic: string
+}
+
+export interface AppBindItem extends AppBind {
+  index: number
+  status: AppBindStatus
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -67,6 +113,11 @@ export const api = {
   getStatus: () => request<StatusResponse>('/status'),
   listRoutes: () => request<RouteItem[]>('/routes'),
   listAdapters: () => request<AdapterItem[]>('/adapters'),
+  ping: (body: PingRequest) =>
+    request<PingResult>('/ping', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   createRoute: (rule: RoutingRule) =>
     request<RouteItem>('/routes', {
       method: 'POST',
@@ -84,6 +135,20 @@ export const api = {
     }),
   deleteRoute: (index: number) =>
     request<void>(`/routes/${index}`, { method: 'DELETE' }),
+  listProcesses: () => request<ProcessItem[]>('/processes'),
+  listAppBinds: () => request<AppBindItem[]>('/app-binds'),
+  createAppBind: (bind: AppBind) =>
+    request<AppBindItem>('/app-binds', {
+      method: 'POST',
+      body: JSON.stringify(bind),
+    }),
+  updateAppBind: (index: number, bind: AppBind) =>
+    request<AppBindItem>(`/app-binds/${index}`, {
+      method: 'PUT',
+      body: JSON.stringify(bind),
+    }),
+  deleteAppBind: (index: number) =>
+    request<void>(`/app-binds/${index}`, { method: 'DELETE' }),
   installService: () =>
     request<ServiceActionResponse>('/service/install', { method: 'POST' }),
   startService: () =>

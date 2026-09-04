@@ -15,6 +15,8 @@ const refreshTick = ref(0)
 const nav = [
   { to: '/status', label: 'Status' },
   { to: '/routes', label: 'Routes' },
+  { to: '/app-binds', label: 'App binds' },
+  { to: '/ping', label: 'Ping' },
   { to: '/settings', label: 'Settings' },
   { to: '/about-me', label: 'About Me' },
 ] as const

@@ -194,7 +194,14 @@ pub fn gateway_from_forward_table(if_index: u32) -> Result<Ipv4Addr> {
     }
 }
 
-fn route_add(dest: Ipv4Addr, prefix_len: u8, gateway: Ipv4Addr, if_index: u32) -> Result<()> {
+/// True when a /32 (or any) host row for `dest` is already in the forwarding table.
+pub fn host_route_exists(dest: Ipv4Addr) -> Result<bool> {
+    Ok(read_applied_ipv4_routes()?
+        .into_iter()
+        .any(|row| row.dest == dest && row.prefix_len == 32))
+}
+
+pub fn route_add(dest: Ipv4Addr, prefix_len: u8, gateway: Ipv4Addr, if_index: u32) -> Result<()> {
     let mask = prefix_mask(prefix_len);
     let output = Command::new("route")
         .args([
@@ -226,7 +233,7 @@ fn route_add(dest: Ipv4Addr, prefix_len: u8, gateway: Ipv4Addr, if_index: u32) -
     ))
 }
 
-fn route_delete(dest: Ipv4Addr) {
+pub fn route_delete(dest: Ipv4Addr) {
     let _ = Command::new("route")
         .args(["delete", &dest.to_string()])
         .status();

@@ -1,3 +1,7 @@
+mod app_binds;
+
+pub use app_binds::{AppBind, AppBindStatus, AppBindStore};
+
 use anyhow::{anyhow, Result};
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};

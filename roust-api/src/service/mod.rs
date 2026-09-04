@@ -1,7 +1,8 @@
 //! Windows Service Control Manager (SCM) integration for the packet router daemon.
 
-use crate::config::Config;
+use crate::config::{AppBindStore, Config};
 use crate::core::{self, PacketRouter};
+use crate::wfp::WfpEngine;
 use anyhow::{anyhow, Context, Result};
 use std::env;
 use std::ffi::OsString;
@@ -166,7 +167,26 @@ fn run_service() -> Result<()> {
         })
         .context("set service status Running")?;
 
+    // App-bind WFP is best-effort: WinDivert routing still runs if WFP init fails.
+    let app_binds_path = AppBindStore::path_beside(&Config::default_config_path());
+    let _wfp = match WfpEngine::start(&app_binds_path) {
+        Ok(engine) => {
+            log::info!(
+                "WFP app-bind engine started ({})",
+                app_binds_path.display()
+            );
+            Some(engine)
+        }
+        Err(err) => {
+            log::error!(
+                "WFP app-bind engine failed to start (WinDivert still running): {err:#}"
+            );
+            None
+        }
+    };
+
     let run_result = router.run();
+    drop(_wfp);
 
     status_handle
         .set_service_status(ServiceStatus {

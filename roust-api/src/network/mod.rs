@@ -47,8 +47,12 @@ pub struct EgressPrediction {
     pub nic_friendly: Option<String>,
 }
 
+mod ping;
+mod processes;
 mod routes;
 mod win;
+pub use ping::{ping_via_nic, PingReply, PingResult};
+pub use processes::{list_processes, resolve_image_name_to_path, ProcessItem};
 pub use routes::{
     discover_external_routes, gateway_from_forward_table, install_routes_for_rules,
     read_applied_ipv4_routes, remove_installed_routes, rule_identity_key, system_row_to_rule,

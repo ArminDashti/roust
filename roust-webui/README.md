@@ -6,6 +6,8 @@ Vue 3 + Vite + Tailwind + shadcn-vue management UI for [`roust-api`](https://git
 
 - Live **service status** (`GET /api/status`)
 - **Route list** with add / edit / delete (`/api/routes`)
+- **App binds** — force a process through a chosen NIC (`/api/app-binds`, fail-closed via WFP)
+- **Ping from NIC** diagnostic (`POST /api/ping`)
 
 ## Local development
 

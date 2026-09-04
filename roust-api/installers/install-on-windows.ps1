@@ -255,6 +255,11 @@ Test-RoustOnPath
 
 Write-Host ''
 Write-Step 'Registering Windows service (requires elevation)...'
+$existingSvc = Get-Service -Name 'Roust' -ErrorAction SilentlyContinue
+if ($existingSvc) {
+    Write-Step 'Uninstalling existing Roust service before re-register...'
+    & $InstallExe --uninstall-service 2>&1 | ForEach-Object { Write-Host $_ }
+}
 & $InstallExe --install-service 2>&1 | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) {
     Write-Warning 'Service install failed. Run manually as Administrator: roust --install-service'
