@@ -1,0 +1,11 @@
+project_name: roust
+target_repo: C:/Users/armin/GitHub/roust
+api_dir: roust-api
+webui_dir: roust-webui
+stack_name: roust
+api_port: "8100"
+webui_port: "5100"
+postgres_port: "5400"
+state_dir: .armin/state
+postgres_container: roust-postgres-native
+postgres_volume: roust-postgres-native-data
