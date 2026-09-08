@@ -41,3 +41,5 @@ roust-webui/node_modules/@ts-morph/common/dist/typescript.js
 roust-webui/node_modules/lightningcss-win32-x64-msvc/lightningcss.win32-x64-msvc.node
 roust-webui/node_modules/typescript/lib/_tsc.js
 roust-webui/node_modules/typescript/lib/typescript.js
+
+# AUTO-LARGE-FILES (>5MB) — managed by commit-push-to-github
