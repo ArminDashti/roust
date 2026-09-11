@@ -236,6 +236,42 @@ function Stop-RoustServiceIfPresent {
     }
 }
 
+function Test-FileLocked([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $stream.Close()
+        return $false
+    }
+    catch {
+        return $true
+    }
+}
+
+function Stop-WinDivertDriver {
+    foreach ($name in @('WinDivert', 'WinDivert14')) {
+        $queryOut = & sc.exe query $name 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { continue }
+        if ($queryOut -notmatch 'RUNNING') { continue }
+
+        Write-Step "Stopping kernel driver '$name'"
+        & sc.exe stop $name 2>&1 | ForEach-Object { Write-Host $_ }
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline) {
+            $again = & sc.exe query $name 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0 -or $again -match 'STOPPED') { break }
+            Start-Sleep -Milliseconds 400
+        }
+    }
+}
+
+function Assert-WinDivertSysUnlocked {
+    $sys = Join-Path $InstallDir 'WinDivert64.sys'
+    if ((Test-Path -LiteralPath $sys) -and (Test-FileLocked $sys)) {
+        throw "WinDivert64.sys is still locked under $InstallDir after stopping WinDivert; cannot remove or replace it."
+    }
+}
+
 function Uninstall-RoustServiceKeepData {
     $exeCandidates = @(
         (Join-Path $InstallDir 'roust.exe'),
@@ -266,6 +302,8 @@ function Remove-AppKeepData {
     Write-Step 'Removing installed app (keeping routes.json / app-binds.json and other data)'
     Stop-AppProcesses
     Uninstall-RoustServiceKeepData
+    Stop-WinDivertDriver
+    Assert-WinDivertSysUnlocked
 
     if (-not (Test-Path -LiteralPath $InstallDir)) { return }
 
@@ -276,6 +314,11 @@ function Remove-AppKeepData {
             Write-Step "Removing app file $name"
             Remove-Item -LiteralPath $path -Force -ErrorAction Stop
         }
+    }
+
+    $sysLeft = Join-Path $InstallDir 'WinDivert64.sys'
+    if (Test-Path -LiteralPath $sysLeft) {
+        throw "Failed to remove locked or leftover WinDivert64.sys at $sysLeft"
     }
 }
 
@@ -305,6 +348,9 @@ function Install-BinariesToInstallDir {
     Write-Step "Copying binaries to $InstallDir"
     Copy-Item -LiteralPath $roustBuilt -Destination (Join-Path $InstallDir 'roust.exe') -Force
     Copy-Item -LiteralPath $apiBuilt -Destination (Join-Path $InstallDir 'roust-api.exe') -Force
+
+    Stop-WinDivertDriver
+    Assert-WinDivertSysUnlocked
 
     $wd = Resolve-WinDivertX64
     foreach ($name in @('WinDivert.dll', 'WinDivert64.sys')) {

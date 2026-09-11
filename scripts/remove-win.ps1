@@ -94,6 +94,42 @@ function Wait-PortFree([int]$Port, [int]$TimeoutSec = 15) {
     throw "Port $Port is still listening after remove; cannot release it."
 }
 
+function Test-FileLocked([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $stream.Close()
+        return $false
+    }
+    catch {
+        return $true
+    }
+}
+
+function Stop-WinDivertDriver {
+    foreach ($name in @('WinDivert', 'WinDivert14')) {
+        $queryOut = & sc.exe query $name 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { continue }
+        if ($queryOut -notmatch 'RUNNING') { continue }
+
+        Write-Step "Stopping kernel driver '$name'"
+        & sc.exe stop $name 2>&1 | ForEach-Object { Write-Host $_ }
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline) {
+            $again = & sc.exe query $name 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0 -or $again -match 'STOPPED') { break }
+            Start-Sleep -Milliseconds 400
+        }
+    }
+}
+
+function Assert-WinDivertSysUnlocked {
+    $sys = Join-Path $InstallDir 'WinDivert64.sys'
+    if ((Test-Path -LiteralPath $sys) -and (Test-FileLocked $sys)) {
+        throw "WinDivert64.sys is still locked under $InstallDir after stopping WinDivert; cannot remove or replace it."
+    }
+}
+
 function Uninstall-RoustService {
     $exeCandidates = @(
         (Join-Path $InstallDir 'roust.exe'),
@@ -153,18 +189,27 @@ try {
     Stop-ListenersOnPort -Port $apiPort -Label 'API'
 
     Uninstall-RoustService
+    Stop-WinDivertDriver
+    Assert-WinDivertSysUnlocked
 
     Wait-PortFree -Port $webUiPort
     Wait-PortFree -Port $apiPort
 
     if (Test-Path -LiteralPath $InstallDir) {
         Write-Step "Removing install directory $InstallDir"
-        Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath $InstallDir) {
+            $sys = Join-Path $InstallDir 'WinDivert64.sys'
+            if (Test-Path -LiteralPath $sys) {
+                throw "Install dir remove left WinDivert64.sys at $sys"
+            }
+            throw "Install directory still present after remove: $InstallDir"
+        }
     }
 
     if (Test-Path -LiteralPath $StateDir) {
         Write-Step "Clearing state directory $StateDir"
-        Remove-Item -LiteralPath $StateDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $StateDir -Recurse -Force -ErrorAction Stop
     }
 
     Write-Ok 'Local Windows remove complete'
