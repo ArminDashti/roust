@@ -1,4 +1,4 @@
-export type TargetKind = 'nic' | 'ip' | 'cidr' | 'mac'
+export type TargetKind = 'nic' | 'ip' | 'cidr' | 'mac' | 'hostname'
 export type DestinationKind = 'nic' | 'ip' | 'mac'
 
 export interface StatusResponse {
@@ -85,6 +85,24 @@ export interface AppBindItem extends AppBind {
   status: AppBindStatus
 }
 
+export interface DnsException {
+  namespace: string
+  'dns-server': string
+}
+
+export interface DnsExceptionItem extends DnsException {
+  index: number
+}
+
+export interface HostOverride {
+  hostname: string
+  ip: string
+}
+
+export interface HostOverrideItem extends HostOverride {
+  index: number
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -149,6 +167,32 @@ export const api = {
     }),
   deleteAppBind: (index: number) =>
     request<void>(`/app-binds/${index}`, { method: 'DELETE' }),
+  listDnsExceptions: () => request<DnsExceptionItem[]>('/dns-exceptions'),
+  createDnsException: (exception: DnsException) =>
+    request<DnsExceptionItem>('/dns-exceptions', {
+      method: 'POST',
+      body: JSON.stringify(exception),
+    }),
+  updateDnsException: (index: number, exception: DnsException) =>
+    request<DnsExceptionItem>(`/dns-exceptions/${index}`, {
+      method: 'PUT',
+      body: JSON.stringify(exception),
+    }),
+  deleteDnsException: (index: number) =>
+    request<void>(`/dns-exceptions/${index}`, { method: 'DELETE' }),
+  listHostOverrides: () => request<HostOverrideItem[]>('/host-overrides'),
+  createHostOverride: (override_: HostOverride) =>
+    request<HostOverrideItem>('/host-overrides', {
+      method: 'POST',
+      body: JSON.stringify(override_),
+    }),
+  updateHostOverride: (index: number, override_: HostOverride) =>
+    request<HostOverrideItem>(`/host-overrides/${index}`, {
+      method: 'PUT',
+      body: JSON.stringify(override_),
+    }),
+  deleteHostOverride: (index: number) =>
+    request<void>(`/host-overrides/${index}`, { method: 'DELETE' }),
   installService: () =>
     request<ServiceActionResponse>('/service/install', { method: 'POST' }),
   startService: () =>

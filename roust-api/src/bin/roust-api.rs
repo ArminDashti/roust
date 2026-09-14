@@ -11,7 +11,7 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1:8787")]
     bind: String,
 
-    /// Path to routes.json (defaults to ProgramData/roust or cwd)
+    /// Path to routes.json (defaults to install-dir beside exe, else ProgramData, else cwd)
     #[arg(long)]
     config: Option<PathBuf>,
 }

@@ -5,6 +5,7 @@ const KIND_LABELS: Record<string, string> = {
   ip: 'IP',
   nic: 'NIC',
   mac: 'MAC',
+  hostname: 'Hostname',
 }
 
 export function kindLabel(kind: TargetKind | DestinationKind | string): string {

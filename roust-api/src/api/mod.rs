@@ -1,6 +1,9 @@
 //! Management HTTP API for service status, routes, and per-app NIC binds.
 
-use crate::config::{AppBind, AppBindStatus, AppBindStore, Config, RoutingRule};
+use crate::config::{
+    apply_hosts, apply_nrpt, AppBind, AppBindStatus, AppBindStore, Config, DnsException,
+    DnsExceptionStore, HostOverride, HostOverrideStore, RoutingRule,
+};
 use crate::network::{
     discover_external_routes, enumerate_interfaces, list_processes, ping_via_nic, ProcessItem,
     PingResult,
@@ -137,6 +140,46 @@ fn save_app_binds(routes_path: &PathBuf, store: &AppBindStore) -> Result<(), Api
     store
         .save(app_binds_path(routes_path))
         .map_err(|e| ApiError::internal(format!("failed to save app-binds: {e}")))
+}
+
+fn dns_exceptions_path(routes_path: &PathBuf) -> PathBuf {
+    DnsExceptionStore::path_beside(routes_path)
+}
+
+fn load_dns_exceptions(routes_path: &PathBuf) -> Result<DnsExceptionStore, ApiError> {
+    DnsExceptionStore::load(dns_exceptions_path(routes_path))
+        .map_err(|e| ApiError::bad_request(e.to_string()))
+}
+
+fn save_dns_exceptions(routes_path: &PathBuf, store: &DnsExceptionStore) -> Result<(), ApiError> {
+    store
+        .save(dns_exceptions_path(routes_path))
+        .map_err(|e| ApiError::internal(format!("failed to save dns-exceptions: {e}")))
+}
+
+fn apply_dns_exceptions(store: &DnsExceptionStore) -> Result<(), ApiError> {
+    apply_nrpt(store.get_exceptions())
+        .map_err(|e| ApiError::internal(format!("failed to apply NRPT dns exceptions: {e}")))
+}
+
+fn host_overrides_path(routes_path: &PathBuf) -> PathBuf {
+    HostOverrideStore::path_beside(routes_path)
+}
+
+fn load_host_overrides(routes_path: &PathBuf) -> Result<HostOverrideStore, ApiError> {
+    HostOverrideStore::load(host_overrides_path(routes_path))
+        .map_err(|e| ApiError::bad_request(e.to_string()))
+}
+
+fn save_host_overrides(routes_path: &PathBuf, store: &HostOverrideStore) -> Result<(), ApiError> {
+    store
+        .save(host_overrides_path(routes_path))
+        .map_err(|e| ApiError::internal(format!("failed to save host-overrides: {e}")))
+}
+
+fn apply_host_overrides(store: &HostOverrideStore) -> Result<(), ApiError> {
+    apply_hosts(store.get_overrides())
+        .map_err(|e| ApiError::internal(format!("failed to apply host overrides: {e}")))
 }
 
 fn maybe_restart_running_service() -> Result<(), ApiError> {
@@ -426,6 +469,157 @@ async fn delete_app_bind(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Serialize)]
+struct DnsExceptionItem {
+    index: usize,
+    #[serde(flatten)]
+    exception: DnsException,
+}
+
+async fn list_dns_exceptions(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<DnsExceptionItem>>, ApiError> {
+    let store = load_dns_exceptions(&state.config_path)?;
+    let items = store
+        .get_exceptions()
+        .iter()
+        .enumerate()
+        .map(|(index, exception)| DnsExceptionItem {
+            index,
+            exception: exception.clone(),
+        })
+        .collect();
+    Ok(Json(items))
+}
+
+async fn create_dns_exception(
+    State(state): State<Arc<AppState>>,
+    Json(exception): Json<DnsException>,
+) -> Result<(StatusCode, Json<DnsExceptionItem>), ApiError> {
+    let mut store = load_dns_exceptions(&state.config_path)?;
+    store
+        .add(exception)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    save_dns_exceptions(&state.config_path, &store)?;
+    apply_dns_exceptions(&store)?;
+    let index = store.get_exceptions().len().saturating_sub(1);
+    let exception = store.get_exceptions()[index].clone();
+    Ok((
+        StatusCode::CREATED,
+        Json(DnsExceptionItem { index, exception }),
+    ))
+}
+
+async fn update_dns_exception(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+    Json(exception): Json<DnsException>,
+) -> Result<Json<DnsExceptionItem>, ApiError> {
+    let mut store = load_dns_exceptions(&state.config_path)?;
+    store.replace_at(index, exception).map_err(|e| {
+        if e.to_string().contains("not found") {
+            ApiError::not_found(e.to_string())
+        } else {
+            ApiError::bad_request(e.to_string())
+        }
+    })?;
+    save_dns_exceptions(&state.config_path, &store)?;
+    apply_dns_exceptions(&store)?;
+    let exception = store.get_exceptions()[index].clone();
+    Ok(Json(DnsExceptionItem { index, exception }))
+}
+
+async fn delete_dns_exception(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<StatusCode, ApiError> {
+    let mut store = load_dns_exceptions(&state.config_path)?;
+    if !store.remove_at(index) {
+        return Err(ApiError::not_found(format!(
+            "dns exception index {index} not found"
+        )));
+    }
+    save_dns_exceptions(&state.config_path, &store)?;
+    apply_dns_exceptions(&store)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct HostOverrideItem {
+    index: usize,
+    #[serde(flatten)]
+    override_: HostOverride,
+}
+
+async fn list_host_overrides(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<HostOverrideItem>>, ApiError> {
+    let store = load_host_overrides(&state.config_path)?;
+    let items = store
+        .get_overrides()
+        .iter()
+        .enumerate()
+        .map(|(index, override_)| HostOverrideItem {
+            index,
+            override_: override_.clone(),
+        })
+        .collect();
+    Ok(Json(items))
+}
+
+async fn create_host_override(
+    State(state): State<Arc<AppState>>,
+    Json(override_): Json<HostOverride>,
+) -> Result<(StatusCode, Json<HostOverrideItem>), ApiError> {
+    let mut store = load_host_overrides(&state.config_path)?;
+    store
+        .add(override_)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    // Apply before save so a locked hosts file does not leave orphan JSON.
+    apply_host_overrides(&store)?;
+    save_host_overrides(&state.config_path, &store)?;
+    let index = store.get_overrides().len().saturating_sub(1);
+    let override_ = store.get_overrides()[index].clone();
+    Ok((
+        StatusCode::CREATED,
+        Json(HostOverrideItem { index, override_ }),
+    ))
+}
+
+async fn update_host_override(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+    Json(override_): Json<HostOverride>,
+) -> Result<Json<HostOverrideItem>, ApiError> {
+    let mut store = load_host_overrides(&state.config_path)?;
+    store.replace_at(index, override_).map_err(|e| {
+        if e.to_string().contains("not found") {
+            ApiError::not_found(e.to_string())
+        } else {
+            ApiError::bad_request(e.to_string())
+        }
+    })?;
+    apply_host_overrides(&store)?;
+    save_host_overrides(&state.config_path, &store)?;
+    let override_ = store.get_overrides()[index].clone();
+    Ok(Json(HostOverrideItem { index, override_ }))
+}
+
+async fn delete_host_override(
+    State(state): State<Arc<AppState>>,
+    Path(index): Path<usize>,
+) -> Result<StatusCode, ApiError> {
+    let mut store = load_host_overrides(&state.config_path)?;
+    if !store.remove_at(index) {
+        return Err(ApiError::not_found(format!(
+            "host override index {index} not found"
+        )));
+    }
+    apply_host_overrides(&store)?;
+    save_host_overrides(&state.config_path, &store)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 struct PingRequest {
     host: String,
@@ -537,6 +731,22 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/app-binds/{index}",
             axum::routing::put(update_app_bind).delete(delete_app_bind),
+        )
+        .route(
+            "/api/dns-exceptions",
+            get(list_dns_exceptions).post(create_dns_exception),
+        )
+        .route(
+            "/api/dns-exceptions/{index}",
+            axum::routing::put(update_dns_exception).delete(delete_dns_exception),
+        )
+        .route(
+            "/api/host-overrides",
+            get(list_host_overrides).post(create_host_override),
+        )
+        .route(
+            "/api/host-overrides/{index}",
+            axum::routing::put(update_host_override).delete(delete_host_override),
         )
         .route("/api/service/install", post(service_install))
         .route("/api/service/start", post(service_start))

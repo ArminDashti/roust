@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   api,
   type RouteItem,
@@ -8,6 +8,15 @@ import {
 import RouteFormDialog from '@/components/RouteFormDialog.vue'
 import RoutesPanel from '@/components/RoutesPanel.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { AlertCircle } from 'lucide-vue-next'
 import { kindLabel } from '@/lib/kindLabels'
 
@@ -21,9 +30,26 @@ const editing = ref<RouteItem | null>(null)
 const saving = ref(false)
 const formError = ref<string | null>(null)
 
+const deleteOpen = ref(false)
+const pendingDelete = ref<RouteItem | null>(null)
+const deleting = ref(false)
+
 function ruleLabel(rule: RoutingRule) {
   return `${kindLabel(rule.target)}:${rule['target-value']} → ${kindLabel(rule.destination)}:${rule['destination-value']}`
 }
+
+const deleteTitle = computed(() =>
+  pendingDelete.value?.source === 'system' ? 'Delete system route?' : 'Delete route?',
+)
+
+const deleteDescription = computed(() => {
+  const route = pendingDelete.value
+  if (!route) return ''
+  if (route.source === 'system') {
+    return `${ruleLabel(route)}\n\nIt will be adopted into App rules, then removed. The OS route may reappear as System afterward.`
+  }
+  return ruleLabel(route)
+})
 
 async function refresh() {
   loading.value = true
@@ -111,28 +137,33 @@ async function onSubmit(payload: RoutingRule | RoutingRule[]) {
   }
 }
 
-async function onRemove(route: RouteItem) {
+function onRemove(route: RouteItem) {
+  error.value = null
+  pendingDelete.value = route
+  deleteOpen.value = true
+}
+
+async function confirmDelete() {
+  const route = pendingDelete.value
+  if (!route) return
+  deleting.value = true
   error.value = null
   try {
     if (route.source === 'system') {
-      const ok = window.confirm(
-        `Delete this System route from Roust?\n\n${ruleLabel(route)}\n\n` +
-          'It will be adopted into App rules, then removed. ' +
-          'The OS route may reappear as System afterward.',
-      )
-      if (!ok) return
       const adopted = await adoptRoute(route)
       if (adopted.index != null) {
         await api.deleteRoute(adopted.index)
       }
     } else if (route.source === 'config' && route.index != null) {
-      const ok = window.confirm(`Delete route?\n\n${ruleLabel(route)}`)
-      if (!ok) return
       await api.deleteRoute(route.index)
     }
+    deleteOpen.value = false
+    pendingDelete.value = null
     await refresh()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -164,5 +195,34 @@ onMounted(refresh)
       :error="formError"
       @submit="onSubmit"
     />
+
+    <Dialog v-model:open="deleteOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ deleteTitle }}</DialogTitle>
+          <DialogDescription class="whitespace-pre-line">
+            {{ deleteDescription }}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="gap-2 sm:gap-0">
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="deleting"
+            @click="deleteOpen = false"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deleting"
+            @click="confirmDelete"
+          >
+            {{ deleting ? 'Deleting…' : 'Delete' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

@@ -40,7 +40,7 @@ const emit = defineEmits<{
   submit: [rule: RoutingRule | RoutingRule[]]
 }>()
 
-const TARGET_KINDS: TargetKind[] = ['cidr', 'ip', 'nic', 'mac']
+const TARGET_KINDS: TargetKind[] = ['cidr', 'ip', 'hostname', 'nic', 'mac']
 const DESTINATION_KINDS: DestinationKind[] = ['ip', 'nic', 'mac']
 
 const form = reactive<{
@@ -255,6 +255,15 @@ onMounted(() => {
             id="target-value"
             v-model="form['target-value']"
             placeholder="e.g. 8.8.8.8"
+            required
+            autocomplete="off"
+          />
+
+          <Input
+            v-else-if="form.target === 'hostname'"
+            id="target-value"
+            v-model="form['target-value']"
+            placeholder="e.g. example.com"
             required
             autocomplete="off"
           />

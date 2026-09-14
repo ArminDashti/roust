@@ -1,6 +1,6 @@
 //! Windows Service Control Manager (SCM) integration for the packet router daemon.
 
-use crate::config::{AppBindStore, Config};
+use crate::config::{apply_hosts, apply_nrpt, AppBindStore, Config, DnsExceptionStore, HostOverrideStore};
 use crate::core::{self, PacketRouter};
 use crate::wfp::WfpEngine;
 use anyhow::{anyhow, Context, Result};
@@ -184,6 +184,38 @@ fn run_service() -> Result<()> {
             None
         }
     };
+
+    let dns_path = DnsExceptionStore::path_beside(&Config::default_config_path());
+    match DnsExceptionStore::load(&dns_path) {
+        Ok(store) => {
+            if let Err(err) = apply_nrpt(store.get_exceptions()) {
+                log::error!("NRPT dns-exceptions apply failed: {err:#}");
+            } else {
+                log::info!(
+                    "NRPT dns-exceptions applied ({} rule(s) from {})",
+                    store.get_exceptions().len(),
+                    dns_path.display()
+                );
+            }
+        }
+        Err(err) => log::error!("Failed to load dns-exceptions: {err:#}"),
+    }
+
+    let host_path = HostOverrideStore::path_beside(&Config::default_config_path());
+    match HostOverrideStore::load(&host_path) {
+        Ok(store) => {
+            if let Err(err) = apply_hosts(store.get_overrides()) {
+                log::error!("host-overrides apply failed: {err:#}");
+            } else {
+                log::info!(
+                    "host-overrides applied ({} rule(s) from {})",
+                    store.get_overrides().len(),
+                    host_path.display()
+                );
+            }
+        }
+        Err(err) => log::error!("Failed to load host-overrides: {err:#}"),
+    }
 
     let run_result = router.run();
     drop(_wfp);

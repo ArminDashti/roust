@@ -16,6 +16,8 @@ const nav = [
   { to: '/status', label: 'Status' },
   { to: '/routes', label: 'Routes' },
   { to: '/app-binds', label: 'App binds' },
+  { to: '/dns-exceptions', label: 'DNS exceptions' },
+  { to: '/host-overrides', label: 'Host overrides' },
   { to: '/ping', label: 'Ping' },
   { to: '/settings', label: 'Settings' },
   { to: '/about-me', label: 'About Me' },

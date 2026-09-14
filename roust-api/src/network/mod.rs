@@ -47,10 +47,12 @@ pub struct EgressPrediction {
     pub nic_friendly: Option<String>,
 }
 
+mod dns_resolve;
 mod ping;
 mod processes;
 mod routes;
 mod win;
+pub use dns_resolve::resolve_hostname_ipv4s;
 pub use ping::{ping_via_nic, PingReply, PingResult};
 pub use processes::{list_processes, resolve_image_name_to_path, ProcessItem};
 pub use routes::{
@@ -94,12 +96,16 @@ pub fn build_adapter_maps(
 }
 
 /// Compile routing rules against the current host interfaces.
+///
+/// `hostname_last_good` retains last successful A records per hostname
+/// (`ponytail:` sticky last-good — upgrade: TTL-aware per-record refresh).
 pub fn build_compiled_rules(
     config: &crate::config::Config,
+    hostname_last_good: &mut HashMap<String, Vec<Ipv4Addr>>,
 ) -> Result<Vec<crate::config::CompiledRule>> {
     let interfaces = enumerate_interfaces()?;
     let (mac_map, nic_map, gw_map) = build_adapter_maps(&interfaces);
-    config.compile_rules(&mac_map, &nic_map, &gw_map)
+    config.compile_rules(&mac_map, &nic_map, &gw_map, hostname_last_good)
 }
 
 #[cfg(test)]

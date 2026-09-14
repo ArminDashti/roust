@@ -1,6 +1,14 @@
 mod app_binds;
+mod dns_exceptions;
+mod host_overrides;
 
 pub use app_binds::{AppBind, AppBindStatus, AppBindStore};
+pub use dns_exceptions::{
+    apply_nrpt, clear_roust_nrpt, DnsException, DnsExceptionStore, NRPT_COMMENT,
+};
+pub use host_overrides::{
+    apply_hosts, clear_roust_hosts, HostOverride, HostOverrideStore, HOSTS_BEGIN, HOSTS_END,
+};
 
 use anyhow::{anyhow, Result};
 use ipnetwork::IpNetwork;
@@ -43,6 +51,7 @@ pub enum TargetKind {
     Ip,
     Cidr,
     Mac,
+    Hostname,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -205,6 +214,49 @@ pub fn validate_ipv4(ip: &str) -> Result<Ipv4Addr> {
         .map_err(|_| anyhow!("invalid IPv4 address \"{trimmed}\""))
 }
 
+/// Validate a hostname target (no scheme, path, port, or wildcards).
+pub fn validate_hostname(value: &str) -> Result<String> {
+    let trimmed = value.trim().trim_end_matches('.').to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return Err(anyhow!("hostname must not be empty"));
+    }
+    if trimmed.contains("://") || trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(anyhow!(
+            "hostname \"{trimmed}\" must not include a URL scheme or path"
+        ));
+    }
+    if trimmed.contains(':') {
+        return Err(anyhow!(
+            "hostname \"{trimmed}\" must not include a port (use the bare hostname)"
+        ));
+    }
+    if trimmed.contains('*') {
+        return Err(anyhow!(
+            "hostname \"{trimmed}\" must not include wildcards"
+        ));
+    }
+    if trimmed.parse::<Ipv4Addr>().is_ok() || trimmed.parse::<std::net::Ipv6Addr>().is_ok() {
+        return Err(anyhow!(
+            "hostname \"{trimmed}\" looks like an IP; use target kind \"ip\" instead"
+        ));
+    }
+    if !trimmed
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        return Err(anyhow!(
+            "hostname \"{trimmed}\" contains invalid characters"
+        ));
+    }
+    if trimmed.starts_with('-') || trimmed.ends_with('-') || trimmed.starts_with('.') {
+        return Err(anyhow!("hostname \"{trimmed}\" is malformed"));
+    }
+    if trimmed.split('.').any(|label| label.is_empty() || label.len() > 63) {
+        return Err(anyhow!("hostname \"{trimmed}\" has an empty or oversized label"));
+    }
+    Ok(trimmed)
+}
+
 fn is_mac_address(value: &str) -> bool {
     let normalized = value.replace('-', ":");
     let octets: Vec<&str> = normalized.split(':').collect();
@@ -238,6 +290,9 @@ pub fn validate_target(kind: TargetKind, value: &str) -> Result<()> {
             }
         }
         TargetKind::Nic => {}
+        TargetKind::Hostname => {
+            validate_hostname(trimmed)?;
+        }
     }
     Ok(())
 }
@@ -375,11 +430,47 @@ impl Config {
         mac_map: &HashMap<String, MacEntry>,
         nic_map: &HashMap<String, MacEntry>,
         gw_map: &HashMap<Ipv4Addr, MacEntry>,
+        hostname_last_good: &mut HashMap<String, Vec<Ipv4Addr>>,
     ) -> Result<Vec<CompiledRule>> {
         let mut compiled = Vec::with_capacity(self.rules.len());
         for rule in &self.rules {
-            let match_pattern = Self::compile_target(rule.target, &rule.target_value, mac_map, nic_map)?;
             let entry = Self::resolve_destination(rule, mac_map, nic_map, gw_map)?;
+            if rule.target == TargetKind::Hostname {
+                let host = validate_hostname(&rule.target_value)?;
+                let ips = match crate::network::resolve_hostname_ipv4s(&host) {
+                    Ok(ips) => {
+                        hostname_last_good.insert(host.clone(), ips.clone());
+                        ips
+                    }
+                    Err(err) => {
+                        if let Some(prev) = hostname_last_good.get(&host).cloned() {
+                            log::warn!(
+                                "hostname resolve failed for {host} ({err:#}); using last-good {:?}",
+                                prev
+                            );
+                            prev
+                        } else {
+                            log::warn!(
+                                "hostname resolve failed for {host} ({err:#}); skipping until resolved"
+                            );
+                            continue;
+                        }
+                    }
+                };
+                for ip in ips {
+                    compiled.push(CompiledRule {
+                        label: format!("{} ({ip})", rule.label()),
+                        gateway: entry.gateway,
+                        match_pattern: MatchPattern::Ip(ip),
+                        if_index: entry.if_index,
+                        egress_ipv4: entry.egress_ipv4,
+                    });
+                }
+                continue;
+            }
+
+            let match_pattern =
+                Self::compile_target(rule.target, &rule.target_value, mac_map, nic_map)?;
             compiled.push(CompiledRule {
                 label: rule.label(),
                 gateway: entry.gateway,
@@ -461,10 +552,24 @@ impl Config {
                 })?;
                 Ok(MatchPattern::Interface(entry.if_index))
             }
+            TargetKind::Hostname => Err(anyhow!(
+                "hostname targets are expanded in compile_rules, not compile_target"
+            )),
         }
     }
 
     pub fn default_config_path() -> PathBuf {
+        // Prefer routes.json beside this binary (install dir). The API is started
+        // with `--config <install>/routes.json`; the Windows service must load the
+        // same file or UI/API edits never reach WinDivert / host routes.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let beside = dir.join("routes.json");
+                if beside.exists() {
+                    return beside;
+                }
+            }
+        }
         if let Ok(program_data) = std::env::var("ProgramData") {
             let path = PathBuf::from(program_data)
                 .join("roust")
@@ -584,7 +689,7 @@ mod tests {
         let mut gw_map = HashMap::new();
         gw_map.insert(Ipv4Addr::new(192, 168, 1, 1), make_entry(42, Ipv4Addr::new(192, 168, 1, 1)));
         let compiled = config
-            .compile_rules(&mac_map, &HashMap::new(), &gw_map)
+            .compile_rules(&mac_map, &HashMap::new(), &gw_map, &mut HashMap::new())
             .unwrap();
         assert_eq!(compiled[0].if_index, 42);
     }
@@ -606,7 +711,7 @@ mod tests {
             make_entry(9, Ipv4Addr::new(10, 0, 0, 1)),
         );
         let compiled = config
-            .compile_rules(&HashMap::new(), &nic_map, &HashMap::new())
+            .compile_rules(&HashMap::new(), &nic_map, &HashMap::new(), &mut HashMap::new())
             .unwrap();
         assert_eq!(compiled[0].if_index, 9);
     }
@@ -628,7 +733,7 @@ mod tests {
             make_entry(1, Ipv4Addr::new(10, 0, 0, 1)),
         );
         let compiled = config
-            .compile_rules(&mac_map, &HashMap::new(), &HashMap::new())
+            .compile_rules(&mac_map, &HashMap::new(), &HashMap::new(), &mut HashMap::new())
             .unwrap();
         let hit = Config::find_compiled(&compiled, Ipv4Addr::new(192, 168, 1, 50), 0);
         assert!(hit.is_some());
@@ -654,11 +759,53 @@ mod tests {
             make_entry(1, Ipv4Addr::new(10, 0, 0, 1)),
         );
         let compiled = config
-            .compile_rules(&mac_map, &nic_map, &HashMap::new())
+            .compile_rules(&mac_map, &nic_map, &HashMap::new(), &mut HashMap::new())
             .unwrap();
         let hit = Config::find_compiled(&compiled, Ipv4Addr::new(1, 2, 3, 4), 7);
         assert!(hit.is_some());
         let miss = Config::find_compiled(&compiled, Ipv4Addr::new(1, 2, 3, 4), 3);
         assert!(miss.is_none());
+    }
+
+    #[test]
+    fn test_validate_hostname_ok() {
+        assert_eq!(validate_hostname("Example.COM").unwrap(), "example.com");
+    }
+
+    #[test]
+    fn test_validate_hostname_rejects_url() {
+        let err = validate_hostname("https://example.com").unwrap_err();
+        assert!(err.to_string().contains("scheme") || err.to_string().contains("path"));
+    }
+
+    #[test]
+    fn test_compile_hostname_from_last_good() {
+        let mut config = Config::new();
+        config
+            .add_rule(RoutingRule {
+                target: TargetKind::Hostname,
+                target_value: "does-not-resolve-roust-test.invalid".into(),
+                destination: DestinationKind::Nic,
+                destination_value: "Ethernet".into(),
+            })
+            .unwrap();
+        let mut nic_map = HashMap::new();
+        nic_map.insert(
+            "ethernet".to_string(),
+            make_entry(3, Ipv4Addr::new(10, 0, 0, 1)),
+        );
+        let mut last_good = HashMap::new();
+        last_good.insert(
+            "does-not-resolve-roust-test.invalid".into(),
+            vec![Ipv4Addr::new(1, 2, 3, 4), Ipv4Addr::new(1, 2, 3, 5)],
+        );
+        let compiled = config
+            .compile_rules(&HashMap::new(), &nic_map, &HashMap::new(), &mut last_good)
+            .unwrap();
+        assert_eq!(compiled.len(), 2);
+        assert!(matches!(
+            compiled[0].match_pattern,
+            MatchPattern::Ip(ip) if ip == Ipv4Addr::new(1, 2, 3, 4)
+        ));
     }
 }

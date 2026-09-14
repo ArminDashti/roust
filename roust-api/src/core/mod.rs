@@ -4,6 +4,7 @@ use crate::network::{
     build_compiled_rules, install_routes_for_rules, remove_installed_routes, InstalledRoute,
 };
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 use std::fs;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -45,6 +46,7 @@ struct RouteStats {
 
 const CONFIG_RELOAD_POLL: Duration = Duration::from_millis(500);
 const CONFIG_RELOAD_DEBOUNCE: Duration = Duration::from_millis(300);
+const HOSTNAME_REFRESH: Duration = Duration::from_secs(60);
 
 pub struct PacketRouter {
     config_path: PathBuf,
@@ -52,11 +54,14 @@ pub struct PacketRouter {
     running: Arc<AtomicBool>,
     compiled_rules: Arc<RwLock<Vec<CompiledRule>>>,
     installed_routes: Arc<Mutex<Vec<InstalledRoute>>>,
+    /// Sticky last-good A records keyed by normalized hostname.
+    hostname_last_good: Arc<Mutex<HashMap<String, Vec<Ipv4Addr>>>>,
 }
 
 impl PacketRouter {
     pub fn with_interfaces(config: Config, config_path: PathBuf) -> Result<Self> {
-        let compiled_rules = build_compiled_rules(&config)?;
+        let mut hostname_last_good = HashMap::new();
+        let compiled_rules = build_compiled_rules(&config, &mut hostname_last_good)?;
         let installed_routes = install_routes_for_rules(&compiled_rules)?;
 
         Ok(PacketRouter {
@@ -65,6 +70,7 @@ impl PacketRouter {
             running: Arc::new(AtomicBool::new(false)),
             compiled_rules: Arc::new(RwLock::new(compiled_rules)),
             installed_routes: Arc::new(Mutex::new(installed_routes)),
+            hostname_last_good: Arc::new(Mutex::new(hostname_last_good)),
         })
     }
 
@@ -77,6 +83,7 @@ impl PacketRouter {
         let compiled_rules = Arc::clone(&self.compiled_rules);
         let installed_routes = Arc::clone(&self.installed_routes);
         let config = Arc::clone(&self.config);
+        let hostname_last_good = Arc::clone(&self.hostname_last_good);
         let running = Arc::clone(&self.running);
         let baseline_mtime = Self::config_modified_time(&config_path);
 
@@ -112,6 +119,7 @@ impl PacketRouter {
                         &config,
                         &compiled_rules,
                         &installed_routes,
+                        &hostname_last_good,
                     ) {
                         Ok(()) => log::info!(
                             "Config reloaded from {}",
@@ -123,6 +131,38 @@ impl PacketRouter {
                     }
                 }
                 let _ = running;
+            })
+            .ok();
+    }
+
+    fn spawn_hostname_refresh(&self) {
+        let config_path = self.config_path.clone();
+        let compiled_rules = Arc::clone(&self.compiled_rules);
+        let installed_routes = Arc::clone(&self.installed_routes);
+        let config = Arc::clone(&self.config);
+        let hostname_last_good = Arc::clone(&self.hostname_last_good);
+
+        thread::Builder::new()
+            .name("roust-hostname-refresh".into())
+            .spawn(move || {
+                while GLOBAL_RUNNING.load(Ordering::SeqCst) {
+                    thread::sleep(HOSTNAME_REFRESH);
+                    if !GLOBAL_RUNNING.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match reload_config_from_disk(
+                        &config_path,
+                        &config,
+                        &compiled_rules,
+                        &installed_routes,
+                        &hostname_last_good,
+                    ) {
+                        Ok(()) => log::debug!("Hostname targets re-resolved"),
+                        Err(err) => log::warn!(
+                            "Hostname refresh failed (keeping previous rules): {err:#}"
+                        ),
+                    }
+                }
             })
             .ok();
     }
@@ -163,6 +203,7 @@ impl PacketRouter {
         GLOBAL_RUNNING.store(true, Ordering::SeqCst);
         GLOBAL_HANDLE.store(handle.raw(), Ordering::SeqCst);
         self.spawn_config_watcher();
+        self.spawn_hostname_refresh();
 
         unsafe {
             windivert_ffi::SetConsoleCtrlHandler(Some(console_ctrl_handler), 1);
@@ -327,9 +368,14 @@ fn reload_config_from_disk(
     config: &Arc<RwLock<Config>>,
     compiled_rules: &Arc<RwLock<Vec<CompiledRule>>>,
     installed_routes: &Arc<Mutex<Vec<InstalledRoute>>>,
+    hostname_last_good: &Arc<Mutex<HashMap<String, Vec<Ipv4Addr>>>>,
 ) -> Result<()> {
     let new_config = Config::load(config_path)?;
-    let new_compiled = build_compiled_rules(&new_config)?;
+    let mut last_good = hostname_last_good
+        .lock()
+        .map_err(|_| anyhow!("hostname last-good lock poisoned"))?;
+    let new_compiled = build_compiled_rules(&new_config, &mut last_good)?;
+    drop(last_good);
 
     let mut installed = installed_routes
         .lock()
